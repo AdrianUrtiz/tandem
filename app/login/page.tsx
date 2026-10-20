@@ -61,7 +61,7 @@ export default function LoginPage() {
       />
       <h1 className="mt-4 text-3xl font-extrabold tracking-tight">Tándem</h1>
       <p className="mt-1 text-sm text-(--muted-foreground)">
-        Finanzas personales y en Pareja
+        Finanzas personales y en pareja
       </p>
       <p className="mt-1 text-[11px] text-(--muted-foreground) italic">
         &quot;Lo tuyo, lo mío y lo nuestro&quot;
@@ -89,7 +89,7 @@ export default function LoginPage() {
               <PasswordInput
                 id="password"
                 name="password"
-                placeholder="••••••••"
+                placeholder=""
                 autoComplete="current-password"
                 required
               />

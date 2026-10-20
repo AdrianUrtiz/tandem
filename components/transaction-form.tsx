@@ -1127,10 +1127,6 @@ export function TransactionForm({
                     maxLength={40}
                     autoComplete="off"
                   />
-                  <p className="text-[11px] text-(--muted-foreground)">
-                    Solo es un recordatorio para ti: no necesita cuenta y no le
-                    llegará ningún aviso.
-                  </p>
                 </div>
               )}
 
@@ -1254,7 +1250,7 @@ export function TransactionForm({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') placeRef.current?.focus()
                 }}
-                placeholder="Tortillas"
+                placeholder="Ej. Supermercado, Uber, Netflix…"
                 maxLength={60}
                 autoComplete="off"
                 className="h-12 text-base"

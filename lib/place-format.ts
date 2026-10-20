@@ -1,6 +1,6 @@
 // Formato descripción + lugar (sin dependencias: apto para cliente).
 //
-// El concepto guardado combina ambas partes ("Tortillas - Abarrotes
+// El concepto guardado combina ambas partes ej. ("Tortillas - Abarrotes
 // Arenas"); el lugar vive aparte (tabla `Place` / Dexie `places`) para
 // sugerirlo en el formulario.
 

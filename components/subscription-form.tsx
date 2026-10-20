@@ -578,10 +578,6 @@ export function SubscriptionForm({
                     maxLength={40}
                     autoComplete="off"
                   />
-                  <p className="text-[11px] text-(--muted-foreground)">
-                    Solo es un recordatorio para ti: no necesita cuenta y no le
-                    llegará ningún aviso.
-                  </p>
                 </div>
               )}
 
