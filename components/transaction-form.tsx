@@ -10,6 +10,7 @@ import {
   Check,
   ChevronDown,
   LayoutGrid,
+  MapPin,
   NotebookPen,
   Plus,
   Users,
@@ -31,6 +32,7 @@ import { Switch } from '@/components/ui/switch'
 
 import { createTransaction, updateTransaction } from '@/lib/actions'
 import type { CatalogRow } from '@/lib/catalog'
+import { useLiveQuery } from 'dexie-react-hooks'
 import {
   CATEGORY_COLORS,
   ICONS,
@@ -47,6 +49,13 @@ import {
   validateOfflineCreate,
 } from '@/lib/offline/outbox'
 import { isPendingId } from '@/lib/offline/pending'
+import { db } from '@/lib/offline/db'
+import {
+  joinConcept,
+  PLACE_MAX_LEN,
+  splitConcept,
+  type PlaceRow,
+} from '@/lib/place-format'
 import { useOnlineStatus } from '@/lib/offline/useOnlineStatus'
 import { syncForce } from '@/lib/offline/useSnapshotSync'
 import { cn } from '@/lib/utils'
@@ -98,7 +107,7 @@ const MSI_OPTS = [1, 3, 6, 9, 12, 15, 24]
 const msiLabel = (m: number) => (m === 1 ? 'Contado' : `${m} MSI`)
 
 type Panel =
-  null | 'cats' | 'account' | 'dest' | 'date' | 'addcat' | 'msi' | 'share'
+  null | 'cats' | 'account' | 'dest' | 'date' | 'addcat' | 'msi' | 'share' | 'desc'
 
 function shortDate(ymd: string) {
   // Hora-muro (ver lib/walltime.ts): el día se interpreta en UTC para que
@@ -157,6 +166,13 @@ export function TransactionForm({
   const [desc, setDesc] = useState(entry?.concept ?? '')
   const [descTouched, setDescTouched] = useState(Boolean(entry?.concept))
   const [editingDesc, setEditingDesc] = useState(false)
+  // Lugar de compra (opcional): se combina como "desc - lugar" y se guarda
+  // para sugerirlo. Al editar se recupera partiendo el concepto guardado.
+  const [place, setPlace] = useState('')
+  const [userEdited, setUserEdited] = useState(false)
+  // Foco al abrir el modal de descripción (input + teclado).
+  const descRef = useRef<HTMLInputElement>(null)
+  const placeRef = useRef<HTMLInputElement>(null)
   const [accountId, setAccountId] = useState(
     entry?.accountId ?? accountOptions[0]?.id ?? '',
   )
@@ -193,6 +209,15 @@ export function TransactionForm({
     editShare ? (entry!.shareExternalName ?? '') : '',
   )
   const [panel, setPanel] = useState<Panel>(null)
+  // Al abrir el modal de descripción se enfoca su input (abre el teclado).
+  useEffect(() => {
+    if (panel !== 'desc') return
+    const t = window.setTimeout(
+      () => descRef.current?.focus({ preventScroll: true }),
+      80,
+    )
+    return () => window.clearTimeout(t)
+  }, [panel])
   const [localRows, setLocalRows] = useState<CatalogRow[]>([])
   const [newCatName, setNewCatName] = useState('')
   const [newCatIcon, setNewCatIcon] = useState<string>(ICON_PRESETS[0])
@@ -203,6 +228,67 @@ export function TransactionForm({
   const online = useOnlineStatus()
   // Nombre de la pareja (desde la copia local) para el panel Compartir.
   const [partnerName, setPartnerName] = useState<string | null>(null)
+  // Lugares guardados (Dexie-first + fallback API en primera carga).
+  const localPlaces = useLiveQuery(
+    () => db.places.orderBy('lastUsedAt').reverse().toArray(),
+    [],
+  )
+  const [remotePlaces, setRemotePlaces] = useState<PlaceRow[] | null>(null)
+  useEffect(() => {
+    if (
+      !online ||
+      localPlaces === undefined ||
+      localPlaces.length > 0 ||
+      remotePlaces !== null
+    )
+      return
+    let alive = true
+    fetch('/api/places', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (alive && j && Array.isArray(j.places)) setRemotePlaces(j.places)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [online, localPlaces, remotePlaces])
+  const places = useMemo(
+    () => (localPlaces?.length ? localPlaces : (remotePlaces ?? [])),
+    [localPlaces, remotePlaces],
+  )
+
+  // Al editar un gasto, parte el concepto guardado ("desc - lugar"):
+  // ajuste durante el render (una sola vez por montaje, cuando la lista
+  // local ya cargó y el usuario aún no tocó los campos).
+  const [didSplit, setDidSplit] = useState(!editing)
+  if (
+    !didSplit &&
+    editing &&
+    entry &&
+    entry.type === 'EXPENSE' &&
+    localPlaces !== undefined &&
+    !userEdited
+  ) {
+    const { desc: d, place: p } = splitConcept(entry.concept, places)
+    if (p) {
+      setDesc(d)
+      setPlace(p)
+    }
+    setDidSplit(true)
+  }
+
+  // Sugerencias: recientes primero, filtran mientras se escribe (excluye el
+  // texto exacto ya escrito).
+  const placeQ = place.trim().toLowerCase()
+  const placeExists = places.some((p) => p.name.toLowerCase() === placeQ)
+  const placeSuggestions = useMemo(() => {
+    return places
+      .filter((p) => p.name.toLowerCase() !== placeQ)
+      .filter((p) => !placeQ || p.name.toLowerCase().includes(placeQ))
+      .slice(0, 6)
+  }, [places, placeQ])
+
   useEffect(() => {
     if (editing) return
     let alive = true
@@ -266,6 +352,12 @@ export function TransactionForm({
 
   function switchMode(m: Mode) {
     setMode(m)
+    // Los lugares son solo de gastos: al salir se descarta el escrito y se
+    // cierra el editor simple por si quedó abierto.
+    if (m !== 'cargo') {
+      setPlace('')
+      setEditingDesc(false)
+    }
     if (m === 'pago') {
       setPanel(null)
       // En pago el origen solo admite débito: si la cuenta actual es la
@@ -377,7 +469,11 @@ export function TransactionForm({
           ? 'Transferencia entre cuentas'
           : 'Pago de tarjeta'
         : prettyCat(category)
-    fd.set('concept', descTouched ? desc.trim() || autoConcept : autoConcept)
+    // Concepto final: "descripción - lugar" (el lugar es opcional).
+    const descPart = descTouched ? desc.trim() || autoConcept : autoConcept
+    const placePart = place.trim()
+    fd.set('concept', joinConcept(descPart, placePart))
+    if (placePart) fd.set('place', placePart)
     fd.set('category', mode === 'pago' ? 'OTRO' : category)
     fd.set('date', buildDateTime(dateYMD, editing ? entry!.date : undefined))
     fd.set('accountId', accountId)
@@ -459,6 +555,7 @@ export function TransactionForm({
         debtorId: debtor?.id,
         debtorName: debtor?.name,
         externalName: strOrUndef(fd.get('externalName')),
+        place: strOrUndef(fd.get('place')),
       }
       const invalid = validateOfflineCreate(input, {
         accounts: accountOptions.map((a) => ({ id: a.id, type: a.type })),
@@ -586,8 +683,10 @@ export function TransactionForm({
         />
       </div>
 
-      {/* Pills: fecha · descripción · cuenta */}
-      {editingDesc ? (
+      {/* Pills: fecha · descripción · cuenta.
+          Ingreso/pago: editor simple inline solo-descripción (como antes).
+          Gasto: la pill abre el modal flotante con descripción + lugar. */}
+      {mode !== 'cargo' && editingDesc ? (
         <div className="flex items-center gap-2">
           <Input
             value={desc}
@@ -614,25 +713,31 @@ export function TransactionForm({
           </Button>
         </div>
       ) : (
-        <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 pb-1">
-          <button
-            type="button"
-            onClick={() => setPanel('date')}
-            className="flex shrink-0 items-center gap-1.5 rounded-full border border-(--border) bg-(--muted)/60 px-4 py-2 text-xs font-semibold">
-            <CalendarDays className="size-3.5" /> {dateLabel}
-          </button>
-          <button
-            type="button"
-            onClick={() => setEditingDesc(true)}
-            className={cn(
-              'flex max-w-[180px] shrink-0 items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold',
-              desc
-                ? 'border-transparent bg-(--foreground) text-(--background)'
-                : 'border-(--border) bg-(--muted)/60',
-            )}>
-            <NotebookPen className="size-3.5" />
-            <span className="truncate">{desc || 'Descripción'}</span>
-          </button>
+      <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 pb-1">
+        <button
+          type="button"
+          onClick={() => setPanel('date')}
+          className="flex shrink-0 items-center gap-1.5 rounded-full border border-(--border) bg-(--muted)/60 px-4 py-2 text-xs font-semibold">
+          <CalendarDays className="size-3.5" /> {dateLabel}
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            mode === 'cargo' ? setPanel('desc') : setEditingDesc(true)
+          }
+          className={cn(
+            'flex max-w-[180px] shrink-0 items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold',
+            desc || place
+              ? 'border-transparent bg-(--foreground) text-(--background)'
+              : 'border-(--border) bg-(--muted)/60',
+          )}>
+          <NotebookPen className="size-3.5" />
+          <span className="truncate">
+            {desc || place
+              ? [desc, place].filter(Boolean).join(' · ')
+              : 'Descripción'}
+          </span>
+        </button>
           {mode === 'pago' ? (
             <>
               <button
@@ -686,7 +791,7 @@ export function TransactionForm({
               )}
             </>
           )}
-        </div>
+      </div>
       )}
 
       {/* Categorías: slider ~85% + botón fijo al grid */}
@@ -1112,6 +1217,107 @@ export function TransactionForm({
               </Button>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal flotante: descripción + lugar (solo gastos; combo buscador) */}
+      <Dialog
+        open={panel === 'desc'}
+        onOpenChange={(o) => !o && setPanel(null)}>
+        <DialogContent className="max-h-[86dvh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Descripción</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="tx-desc">Descripción</Label>
+              <Input
+                id="tx-desc"
+                ref={descRef}
+                value={desc}
+                onChange={(e) => {
+                  setDesc(e.target.value)
+                  setDescTouched(true)
+                  setUserEdited(true)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') placeRef.current?.focus()
+                }}
+                placeholder="Tortillas"
+                maxLength={60}
+                autoComplete="off"
+                className="h-12 text-base"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tx-place">Lugar (opcional)</Label>
+              <div className="relative">
+                <MapPin className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-(--muted-foreground)" />
+                <Input
+                  id="tx-place"
+                  ref={placeRef}
+                  role="combobox"
+                  aria-expanded={placeSuggestions.length > 0}
+                  aria-controls="tx-place-list"
+                  aria-autocomplete="list"
+                  value={place}
+                  onChange={(e) => {
+                    setPlace(e.target.value)
+                    setUserEdited(true)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') setPanel(null)
+                  }}
+                  placeholder="Buscar o escribir un lugar…"
+                  maxLength={PLACE_MAX_LEN}
+                  autoComplete="off"
+                  className="h-12 pl-10 text-base"
+                />
+              </div>
+              {placeSuggestions.length > 0 ? (
+                <ul
+                  id="tx-place-list"
+                  role="listbox"
+                  aria-label="Lugares guardados"
+                  className="max-h-56 space-y-1 overflow-y-auto">
+                  {placeSuggestions.map((p) => {
+                    const selected =
+                      place.trim().toLowerCase() === p.name.toLowerCase()
+                    return (
+                      <li key={p.name} role="option" aria-selected={selected}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPlace(p.name)
+                            setUserEdited(true)
+                            placeRef.current?.focus()
+                          }}
+                          className={`flex w-full items-center gap-2 rounded-2xl px-4 py-2.5 text-left text-sm font-semibold transition hover:bg-(--muted) ${selected ? 'bg-(--muted)' : ''}`}>
+                          <MapPin className="size-4 shrink-0 text-(--muted-foreground)" />
+                          <span className="flex-1 truncate">{p.name}</span>
+                          {selected && (
+                            <Check className="size-4 text-(--primary)" />
+                          )}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : (
+                placeQ && !placeExists && (
+                  <p className="text-center text-xs text-(--muted-foreground)">
+                    Se guardará «{place.trim()}» como nuevo lugar.
+                  </p>
+                )
+              )}
+            </div>
+            <Button
+              type="button"
+              className="h-12 w-full rounded-2xl text-base"
+              onClick={() => setPanel(null)}>
+              Listo
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

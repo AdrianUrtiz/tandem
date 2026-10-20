@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from 'react'
 
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Check, Search } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
-import { ActivityChart } from '@/components/activity-chart'
 import { AccountIcon } from '@/components/account-icon'
+import { ActivityChart } from '@/components/activity-chart'
 import { BottomSheet } from '@/components/bottom-sheet'
 import { CardPayReminders } from '@/components/card-pay-reminders'
 import {
@@ -15,9 +16,9 @@ import {
 } from '@/components/expiry-reminders'
 import { PartnerPayReminders } from '@/components/partner-pay-reminders'
 import { TransactionDetail } from '@/components/transaction-detail'
+import type { AccountOpt } from '@/components/transaction-form'
 import { TransactionRow, type TxRow } from '@/components/transaction-list'
 import { TransactionSwipeRow } from '@/components/transaction-swipe-row'
-import type { AccountOpt } from '@/components/transaction-form'
 import {
   Dialog,
   DialogContent,
@@ -25,17 +26,19 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
+import { byAccountOrder } from '@/lib/accounts'
 import {
   type ActivityKind,
   type ActivityRange,
   useActivityFilters,
 } from '@/lib/activity-filters'
-import { byAccountOrder } from '@/lib/accounts'
 import type { CardPayCandidate } from '@/lib/card-pay'
 import type { CatalogRow } from '@/lib/catalog'
 import { lookupCategory } from '@/lib/categories'
 import { useCuentasFilters } from '@/lib/cuentas-filters'
+import { db } from '@/lib/offline/db'
 import type { PartnerPayItem } from '@/lib/partner-pay'
+import { extractPlaceSuffix } from '@/lib/place-format'
 import { useStatementFilters } from '@/lib/resumen-filters'
 import { formatMoney } from '@/lib/utils'
 import {
@@ -51,7 +54,8 @@ import {
 
 export type MonthOpt = { key: string; label: string; total: number }
 
-type Sheet = null | 'kind' | 'range' | 'month' | 'account' | 'category'
+type Sheet =
+  null | 'kind' | 'range' | 'month' | 'account' | 'category' | 'place'
 
 const RANGES: { value: ActivityRange; label: string }[] = [
   { value: 'mensual', label: 'Mensual' },
@@ -130,11 +134,13 @@ export function ActivityClient({
   const range = useActivityFilters((s) => s.range)
   const account = useActivityFilters((s) => s.account)
   const category = useActivityFilters((s) => s.category)
+  const place = useActivityFilters((s) => s.place)
   const setMonth = useActivityFilters((s) => s.setMonth)
   const setKind = useActivityFilters((s) => s.setKind)
   const setRange = useActivityFilters((s) => s.setRange)
   const setAccount = useActivityFilters((s) => s.setAccount)
   const setCategory = useActivityFilters((s) => s.setCategory)
+  const setPlace = useActivityFilters((s) => s.setPlace)
   const setPartnerMonth = useCuentasFilters((s) => s.setPartnerMonth)
   const setCuentasTab = useCuentasFilters((s) => s.setTab)
   const setStmtCard = useStatementFilters((s) => s.setCardId)
@@ -190,6 +196,11 @@ export function ActivityClient({
         return false
       if (category !== 'todas' && t.category !== category) return false
       if (
+        place !== 'todos' &&
+        extractPlaceSuffix(t.concept)?.toLowerCase() !== place.toLowerCase()
+      )
+        return false
+      if (
         q &&
         !`${t.concept} ${t.category}`.toLowerCase().includes(q.toLowerCase())
       )
@@ -197,7 +208,7 @@ export function ActivityClient({
       return true
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rangeTxs, kind, account, category, q])
+  }, [rangeTxs, kind, account, category, place, q])
 
   const shownTotal = useMemo(
     () => filtered.filter(inKind).reduce((a, t) => a + t.amount, 0),
@@ -353,8 +364,31 @@ export function ActivityClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rangeTxs, kind])
 
+  // Lugares del periodo (del sufijo "desc - lugar" de cada concepto):
+  // conteo calculado sobre movimientos, del tipo activo.
+  const placeOpts = useMemo(() => {
+    const map = new Map<string, { label: string; count: number }>()
+    for (const t of rangeTxs) {
+      if (!inKind(t)) continue
+      const suffix = extractPlaceSuffix(t.concept)
+      if (!suffix) continue
+      const key = suffix.toLowerCase()
+      const row = map.get(key)
+      if (row) row.count += 1
+      else map.set(key, { label: suffix, count: 1 })
+    }
+    return [...map.values()].sort((a, b) => b.count - a.count)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeTxs, kind])
+
   const kindLabel = KINDS.find((k) => k.value === kind)!.label
   const rangeLabel = RANGES.find((r) => r.value === range)!.label
+
+  // Lugares conocidos (para partir "desc - lugar" en el detalle).
+  const knownPlaces = useLiveQuery(
+    () => db.places.orderBy('lastUsedAt').reverse().toArray(),
+    [],
+  )
 
   function close() {
     setSheet(null)
@@ -438,6 +472,11 @@ export function ActivityClient({
             active={category !== 'todas'}
             onClick={() => setSheet('category')}
           />
+          <FilterPill
+            label={place === 'todos' ? 'Todos los lugares' : place}
+            active={place !== 'todos'}
+            onClick={() => setSheet('place')}
+          />
         </div>
       </div>
 
@@ -470,8 +509,16 @@ export function ActivityClient({
         </ul>
       )}
 
-      <BottomSheet open={selected !== null} onOpenChange={(o) => !o && setSelected(null)}>
-        {selected && <TransactionDetail t={selected} cats={cats} />}
+      <BottomSheet
+        open={selected !== null}
+        onOpenChange={(o) => !o && setSelected(null)}>
+        {selected && (
+          <TransactionDetail
+            t={selected}
+            cats={cats}
+            places={knownPlaces ?? []}
+          />
+        )}
       </BottomSheet>
 
       <Dialog open={sheet !== null} onOpenChange={(o) => !o && close()}>
@@ -483,6 +530,7 @@ export function ActivityClient({
               {sheet === 'month' && 'Seleccionar mes'}
               {sheet === 'account' && 'Filtrar por cuenta'}
               {sheet === 'category' && 'Filtrar por categoría'}
+              {sheet === 'place' && 'Filtrar por lugar'}
             </DialogTitle>
           </DialogHeader>
 
@@ -555,6 +603,23 @@ export function ActivityClient({
               }}
             />
           )}
+          {sheet === 'place' && (
+            <Options
+              items={[
+                { value: 'todos', label: 'Todos los lugares' },
+                ...placeOpts.map((p) => ({
+                  value: p.label,
+                  label: p.label,
+                  meta: `${p.count} ${p.count === 1 ? 'compra' : 'compras'}`,
+                })),
+              ]}
+              value={place}
+              onPick={(v) => {
+                setPlace(v)
+                close()
+              }}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -592,6 +657,7 @@ function Options({
     value: string
     label: string
     total?: number
+    meta?: string
     cap?: boolean
     iconType?: string
     iconColor?: string
@@ -617,6 +683,11 @@ function Options({
             </span>
             {it.total !== undefined && (
               <span className="text-sm font-bold">{formatMoney(it.total)}</span>
+            )}
+            {it.meta !== undefined && (
+              <span className="text-xs text-(--muted-foreground)">
+                {it.meta}
+              </span>
             )}
             {it.value === value && (
               <Check className="size-4 text-(--primary)" />

@@ -2,11 +2,12 @@
 
 import { ArrowLeftRight } from 'lucide-react'
 
-import { Badge } from '@/components/ui/badge'
 import type { TxRow } from '@/components/transaction-list'
+import { Badge } from '@/components/ui/badge'
 
 import type { CatalogRow } from '@/lib/catalog'
 import { lookupCategory } from '@/lib/categories'
+import { type PlaceRow, splitConcept } from '@/lib/place-format'
 import { formatMoney } from '@/lib/utils'
 
 function fmtFull(d: string): string {
@@ -48,15 +49,19 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 export function TransactionDetail({
   t,
   cats,
+  places = [],
 }: {
   t: TxRow
   cats: CatalogRow[]
+  /** Lugares conocidos: para partir "desc - lugar" en sus partes. */
+  places?: Pick<PlaceRow, 'name'>[]
 }) {
   const income = t.type === 'INCOME'
   const transfer = t.type === 'TRANSFER'
   const cat = lookupCategory(t.category, cats)
   const CatIcon = cat.icon
   const sign = transfer ? '' : income ? '+' : '−'
+  const { desc, place } = splitConcept(t.concept, places)
 
   return (
     <div className="overflow-y-auto px-5 pt-1 pb-8">
@@ -74,7 +79,7 @@ export function TransactionDetail({
             <CatIcon className="size-6" />
           )}
         </span>
-        <p className="text-lg font-extrabold tracking-tight">{t.concept}</p>
+        <p className="text-lg font-extrabold tracking-tight">{desc}</p>
         <p
           className={`text-3xl font-extrabold tracking-tight ${income ? 'text-emerald-500' : ''}`}>
           {sign}
@@ -106,6 +111,7 @@ export function TransactionDetail({
       <div className="mt-4 divide-y divide-(--border) rounded-3xl border border-(--border) bg-(--muted)/40 px-4">
         <Row label="Tipo" value={typeLabel(t)} />
         {!transfer && <Row label="Categoría" value={cat.label} />}
+        {place && <Row label="Lugar" value={place} />}
         {transfer && t.transferToAccountName ? (
           <Row
             label="Cuentas"

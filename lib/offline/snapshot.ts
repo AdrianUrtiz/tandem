@@ -13,6 +13,7 @@ import type {
   OfflineLineSum,
   OfflinePartnerDebt,
   OfflinePartnerShared,
+  OfflinePlace,
   OfflineShare,
   OfflineSubscription,
   OfflineTransaction,
@@ -38,6 +39,8 @@ export type SnapshotPayload = {
   }
   lineSums: OfflineLineSum[]
   catalog: OfflineCategory[]
+  /** Lugares de compra del usuario (autocompletado del formulario). */
+  places: OfflinePlace[]
   subscriptions: OfflineSubscription[]
   charges: OfflineCharge[]
   cardPayItems: CardPayCandidate[]

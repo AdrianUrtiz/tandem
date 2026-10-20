@@ -7,6 +7,7 @@ import {
   ChevronRight,
   KeyRound,
   LogOut,
+  MapPin,
   MonitorSmartphone,
   Moon,
   RefreshCw,
@@ -170,6 +171,27 @@ export function AjustesClient({
             <span className="block text-sm font-semibold">Categorías</span>
             <span className="block truncate text-xs text-(--muted-foreground)">
               Personaliza tu catálogo
+            </span>
+          </span>
+          <ChevronRight className="size-5 shrink-0 text-(--muted-foreground)" />
+        </Link>
+
+        {/* Lugares (requiere conexión) */}
+        <Link
+          href="/ajustes/lugares"
+          aria-disabled={!online}
+          onClick={online ? undefined : (e) => e.preventDefault()}
+          className={cn(
+            'flex items-center gap-3 rounded-3xl border border-(--border) p-4 transition active:scale-[.99]',
+            !online && 'pointer-events-none opacity-50',
+          )}>
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-(--muted)">
+            <MapPin className="size-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold">Lugares</span>
+            <span className="block truncate text-xs text-(--muted-foreground)">
+              Gestiona tus lugares de compra
             </span>
           </span>
           <ChevronRight className="size-5 shrink-0 text-(--muted-foreground)" />

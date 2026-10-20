@@ -14,9 +14,14 @@ import { getCatalog } from '@/lib/catalog'
 import { getLineSums } from '@/lib/debt-payments'
 import { getGroupSummaries } from '@/lib/group-actions'
 import { normalizeMoney } from '@/lib/money'
-import type { OfflineAccount, OfflineTransaction } from '@/lib/offline/db'
+import type {
+  OfflineAccount,
+  OfflinePlace,
+  OfflineTransaction,
+} from '@/lib/offline/db'
 import { SNAPSHOT_VERSION } from '@/lib/offline/db'
 import type { SnapshotPayload } from '@/lib/offline/snapshot'
+import { getPlaces } from '@/lib/places'
 import { prisma } from '@/lib/prisma'
 import { getSubscriptionData } from '@/lib/subscription-actions'
 import { monthShortOf } from '@/lib/subscriptions'
@@ -48,27 +53,36 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
   const currentMonth = mexicoMonthKey()
   const takenAt = new Date().toISOString()
 
-  const [accRows, balances, catalog, cardPayItems, subData, me, partnerId] =
-    await Promise.all([
-      prisma.account.findMany({
-        where: { isActive: true, userId },
-        include: { user: true },
-        orderBy: [
-          { isFavorite: 'desc' },
-          { position: 'asc' },
-          { createdAt: 'asc' },
-        ],
-      }),
-      getAccountBalances(userId),
-      getCatalog(userId),
-      getCardPayCandidates(userId),
-      getSubscriptionData(userId),
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { name: true },
-      }),
-      import('@/lib/households').then((m) => m.getPartnerId(userId)),
-    ])
+  const [
+    accRows,
+    balances,
+    catalog,
+    cardPayItems,
+    subData,
+    me,
+    partnerId,
+    placeRows,
+  ] = await Promise.all([
+    prisma.account.findMany({
+      where: { isActive: true, userId },
+      include: { user: true },
+      orderBy: [
+        { isFavorite: 'desc' },
+        { position: 'asc' },
+        { createdAt: 'asc' },
+      ],
+    }),
+    getAccountBalances(userId),
+    getCatalog(userId),
+    getCardPayCandidates(userId),
+    getSubscriptionData(userId),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    }),
+    import('@/lib/households').then((m) => m.getPartnerId(userId)),
+    getPlaces(userId),
+  ])
   const meName = me?.name ?? 'Tú'
   const partnerRow = partnerId
     ? await prisma.user.findUnique({
@@ -507,6 +521,11 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
       kind: c.kind,
       isDefault: c.isDefault,
       mine: c.mine,
+    })),
+    places: placeRows.map((p): OfflinePlace => ({
+      key: p.name.trim().toLowerCase(),
+      name: p.name,
+      lastUsedAt: p.lastUsedAt,
     })),
     subscriptions: subData.subs.map((s) => ({
       id: s.id,

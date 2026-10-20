@@ -61,6 +61,7 @@ export default async function ResumenPage() {
   const mine = mineRows.map((t) => ({
     id: t.id,
     type: t.type as 'EXPENSE' | 'INCOME',
+    concept: t.concept,
     category: t.category,
     amount: normalizeMoney(t.amount),
     date: t.date.toISOString(),

@@ -50,6 +50,7 @@ export function toMineTxs(rows: OfflineTransaction[]): ResumenMineTx[] {
     .map((t) => ({
       id: t.id,
       type: t.type as 'EXPENSE' | 'INCOME',
+      concept: t.concept,
       category: t.category,
       amount: t.amount,
       date: t.date,
