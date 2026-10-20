@@ -12,6 +12,8 @@ import {
   optionalMoneySchema,
   toCents,
 } from '@/lib/money'
+import { PLACE_MAX_LEN } from '@/lib/place-format'
+import { touchPlace } from '@/lib/places'
 import { prisma } from '@/lib/prisma'
 import { formatMoney } from '@/lib/utils'
 import { parseWallInput, wallNow } from '@/lib/walltime'
@@ -277,6 +279,8 @@ const UpdateTxSchema = z.object({
   id: z.string().min(1),
   amount: moneySchema,
   concept: z.string().min(2, 'Agrega un concepto'),
+  // Lugar de compra (opcional): se guarda para sugerirlo después.
+  place: z.string().trim().max(PLACE_MAX_LEN).optional(),
   category: z.string().default('OTRO'),
   date: z.string(),
   // Opcional: los gastos grupales sin cuenta indicada no la tienen.
@@ -405,6 +409,7 @@ export async function updateTransaction(formData: FormData) {
         transferToAccountId: newDestId,
       },
     })
+    await touchPlace(userId, v.place)
 
     revalidatePath('/actividad')
     revalidatePath('/resumen')
@@ -550,6 +555,7 @@ export async function updateTransaction(formData: FormData) {
   revalidatePath('/resumen')
   revalidatePath('/cuentas')
   revalidatePath('/grupos')
+  await touchPlace(userId, v.place)
   return { ok: true }
 }
 
@@ -629,6 +635,8 @@ const TxSchema = z.object({
   type: z.enum(['EXPENSE', 'INCOME', 'TRANSFER']).default('EXPENSE'),
   amount: moneySchema,
   concept: z.string().min(2, 'Agrega un concepto'),
+  // Lugar de compra (opcional): se guarda para sugerirlo después.
+  place: z.string().trim().max(PLACE_MAX_LEN).optional(),
   category: z.string().default('OTRO'),
   date: z.string().default(() => wallNow().toISOString()),
   accountId: z.string().min(1, 'Elige una cuenta'),
@@ -742,6 +750,7 @@ export async function createTransaction(formData: FormData) {
       throw e
     }
 
+    await touchPlace(userId, v.place)
     revalidatePath('/actividad')
     revalidatePath('/resumen')
     revalidatePath('/cuentas')
@@ -845,6 +854,7 @@ export async function createTransaction(formData: FormData) {
     throw e
   }
 
+  await touchPlace(userId, v.place)
   revalidatePath('/actividad')
   revalidatePath('/resumen')
   revalidatePath('/cuentas')

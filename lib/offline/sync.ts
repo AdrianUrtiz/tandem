@@ -73,6 +73,7 @@ async function saveSnapshot(snap: SnapshotPayload): Promise<void> {
       db.budgets,
       db.budgetItems,
       db.budgetLimits,
+      db.places,
     ],
     async () => {
       await Promise.all([
@@ -91,6 +92,7 @@ async function saveSnapshot(snap: SnapshotPayload): Promise<void> {
         db.budgets.clear(),
         db.budgetItems.clear(),
         db.budgetLimits.clear(),
+        db.places.clear(),
       ])
       await Promise.all([
         db.accounts.bulkPut(snap.accounts),
@@ -112,6 +114,7 @@ async function saveSnapshot(snap: SnapshotPayload): Promise<void> {
         db.budgets.bulkPut(snap.budgets ?? []),
         db.budgetItems.bulkPut(snap.budgetItems ?? []),
         db.budgetLimits.bulkPut(snap.budgetLimits ?? []),
+        db.places.bulkPut(snap.places ?? []),
       ])
       await db.meta.put({
         key: 'sync',

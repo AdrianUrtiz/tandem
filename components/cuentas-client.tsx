@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
 import type { AccountRow } from '@/components/account-card'
+import { AccountDetail } from '@/components/account-detail'
 import { AccountForm } from '@/components/account-form'
 import { AccountIcon } from '@/components/account-icon'
 import {
@@ -131,6 +132,7 @@ export function CuentasClient({
   const setStmtCard = useStatementFilters((s) => s.setCardId)
   const setStmtPeriod = useStatementFilters((s) => s.setPeriod)
   const [openRow, setOpenRow] = useState<string | null>(null)
+  const [selected, setSelected] = useState<AccountRow | null>(null)
   const [reordering, setReordering] = useState(false)
   const [paySheet, setPaySheet] = useState<{
     d: PartnerDebt
@@ -238,6 +240,7 @@ export function CuentasClient({
       a={a}
       open={openRow === a.id}
       onOpenChange={(o) => setOpenRow(o ? a.id : null)}
+      onSelect={() => setSelected(a)}
       debitOptions={mine
         .filter((m) => m.type === 'DEBIT')
         .map((m) => ({ id: m.id, name: m.name, type: m.type, color: m.color }))}
@@ -454,6 +457,7 @@ export function CuentasClient({
                     onOpenChange={(o) =>
                       setOpenRow(o ? `hidden:${a.id}` : null)
                     }
+                    onSelect={() => setSelected(a)}
                   />
                 ) : (
                   swipe(a)
@@ -641,6 +645,13 @@ export function CuentasClient({
               refresh()
             }}
           />
+        )}
+      </BottomSheet>
+      <BottomSheet
+        open={selected != null}
+        onOpenChange={(o) => !o && setSelected(null)}>
+        {selected && (
+          <AccountDetail key={selected.id} a={selected} cats={cats} />
         )}
       </BottomSheet>
       <BottomSheet

@@ -40,6 +40,7 @@ model User {
   debts                 TransactionShare[]   @relation("Debtor")
   subscriptions         Subscription[]
   categories            Category[]
+  places                Place[]
   paymentsRegistered    DebtPayment[]        @relation("PaymentRegistrar")
   paymentsConfirmed     DebtPayment[]        @relation("PaymentConfirmer")
   settlementsRegistered GroupSettlement[]    @relation("SettlementRegistrar")
@@ -194,6 +195,24 @@ model Category {
 
   @@unique([userId, code])
   @@index([userId])
+}
+
+// Lugares de compra del usuario para el autocompletado del formulario:
+// se guardan solos al escribirlos; el concepto queda "descripción - lugar".
+// `key` (minúsculas) evita duplicados tipo "Oxxo" vs "OXXO".
+model Place {
+  id         String   @id @default(cuid())
+  name       String // capitalización original; se cambia desde Ajustes > Lugares
+  key        String // normalizado para dedup (trim + minúsculas)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastUsedAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, key])
+  @@index([userId, lastUsedAt])
 }
 
 // Plantilla de cargo recurrente mes a mes (ej. Spotify, Netflix).

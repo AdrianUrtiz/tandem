@@ -8,7 +8,8 @@ import type { CardPayCandidate } from '@/lib/card-pay'
 
 // Versión del esquema Dexie. Subir en cada migración futura
 // (el sprint de creación offline añadirá índices/flags sin romper v2).
-export const DB_VERSION = 7
+// v8 agrega el índice `lastUsedAt` a `places` (el orden de sugerencias).
+export const DB_VERSION = 8
 export const DB_NAME = 'tandem-db'
 // Versión del payload de /api/snapshot que esta DB sabe guardar.
 export const SNAPSHOT_VERSION = 7
@@ -114,6 +115,18 @@ export type OfflineCategory = {
   kind: string
   isDefault: boolean
   mine: boolean
+}
+
+// Lugar de compra para el autocompletado (espejo de `Place` del servidor).
+// Un usuario por DB (se limpia al cambiar de sesión): la llave es el
+// nombre normalizado (trim + minúsculas).
+export type OfflinePlace = {
+  /** Nombre normalizado (dedup "Oxxo" vs "OXXO"). */
+  key: string
+  /** Como lo escribió la última vez. */
+  name: string
+  /** ISO del último uso (orden de sugerencias). */
+  lastUsedAt: string
 }
 
 export type OfflineSubscription = {
@@ -248,6 +261,7 @@ class TandemDB extends Dexie {
   cardPay!: Table<CardPayCandidate, string>
   partnerShared!: Table<OfflinePartnerShared, string>
   groups!: Table<OfflineGroup, string>
+  places!: Table<OfflinePlace, string>
   budgets!: Table<OfflineBudget, string>
   budgetItems!: Table<OfflineBudgetItem, string>
   budgetLimits!: Table<OfflineBudgetLimit, [string, string]>
@@ -269,6 +283,7 @@ class TandemDB extends Dexie {
       cardPay: 'cardId',
       partnerShared: 'id',
       groups: 'id',
+      places: 'key, lastUsedAt',
       budgets: 'month',
       budgetItems: 'id, month',
       budgetLimits: '[month+category], month',
@@ -313,6 +328,7 @@ export async function clearLocalData(): Promise<void> {
       db.cardPay,
       db.partnerShared,
       db.groups,
+      db.places,
       db.budgets,
       db.budgetItems,
       db.budgetLimits,
@@ -333,6 +349,7 @@ export async function clearLocalData(): Promise<void> {
         db.cardPay.clear(),
         db.partnerShared.clear(),
         db.groups.clear(),
+        db.places.clear(),
         db.budgets.clear(),
         db.budgetItems.clear(),
         db.budgetLimits.clear(),

@@ -19,6 +19,7 @@ export function SwipeRow({
   disabled,
   direction,
   children,
+  onTap,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -29,6 +30,8 @@ export function SwipeRow({
   disabled?: boolean
   direction?: 'left' | 'right' | 'both'
   children: React.ReactNode
+  /** Tap limpio (sin arrastrar, sin acciones abiertas). */
+  onTap?: () => void
 }) {
   const [x, setX] = useState(0)
   const [dragging, setDragging] = useState(false)
@@ -95,7 +98,12 @@ export function SwipeRow({
       moved.current = false
       return
     }
-    if (open) close()
+    if (open) {
+      close()
+      return
+    }
+    // Tap limpio: el frente no hizo nada, avisa al dueño.
+    onTap?.()
   }
 
   return (
@@ -134,6 +142,7 @@ export function SwipeRow({
         className={cn(
           'relative rounded-3xl bg-(--card)',
           !dragging && 'transition-transform duration-200 ease-out',
+          onTap && 'cursor-pointer',
         )}
         style={{ transform: `translateX(${x}px)`, touchAction: 'pan-y' }}>
         {children}

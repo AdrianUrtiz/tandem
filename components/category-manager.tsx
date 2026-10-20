@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from 'react'
 
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Pencil, Trash2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
+import { AddFab } from '@/components/add-fab'
 import { BottomSheet } from '@/components/bottom-sheet'
 import { type CategoryEditData, CategoryForm } from '@/components/category-form'
 import { Badge } from '@/components/ui/badge'
@@ -59,23 +60,12 @@ export function CategoryManager({ cats }: { cats: CatalogRow[] }) {
   }
 
   return (
-    <div className="space-y-5 px-5 pt-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-xs font-medium text-(--muted-foreground)">
-            Catálogo
-          </p>
-          <p className="text-4xl font-extrabold tracking-tight">
-            {cats.length}
-          </p>
-        </div>
-        <Button
-          size="icon"
-          aria-label="Agregar categoría"
-          className="rounded-full"
-          onClick={() => setAddOpen(true)}>
-          <Plus className="size-5" />
-        </Button>
+    <div className="space-y-5 px-5 pt-4 pb-28">
+      <div>
+        <p className="text-xs font-medium text-(--muted-foreground)">
+          Catálogo
+        </p>
+        <p className="text-4xl font-extrabold tracking-tight">{cats.length}</p>
       </div>
 
       {groups.map((g) => (
@@ -134,6 +124,8 @@ export function CategoryManager({ cats }: { cats: CatalogRow[] }) {
       <p className="text-center text-[11px] text-(--muted-foreground)">
         Las del sistema se pueden editar (aplica a ambos), pero no eliminar
       </p>
+
+      <AddFab label="Agregar categoría" onClick={() => setAddOpen(true)} />
 
       <BottomSheet open={addOpen} onOpenChange={setAddOpen}>
         <CategoryForm onDone={() => setAddOpen(false)} />

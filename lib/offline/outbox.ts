@@ -15,11 +15,13 @@ import { createTransaction } from '@/lib/actions'
 import { debtorMonthlyAmount } from '@/lib/calculations'
 import { fromCents, toCents } from '@/lib/money'
 import {
+  type OfflinePlace,
   type OfflineShare,
   type OfflineTransaction,
   db,
 } from '@/lib/offline/db'
 import { isPendingId, newTempShareId, newTempTxId } from '@/lib/offline/pending'
+import { PLACE_MAX_LEN, PLACE_MIN_LEN } from '@/lib/place-format'
 import { parseWallInput } from '@/lib/walltime'
 
 export const OUTBOX_KIND_CREATE_TX = 'createTransaction'
@@ -49,6 +51,8 @@ export type CreateTxPayload = {
   debtorName?: string
   /** Compartido con alguien sin cuenta (ej. "Mamá"). */
   externalName?: string
+  /** Lugar de compra (opcional): el servidor lo guarda al subir. */
+  place?: string
   creatorName: string
   createdById: string
 }
@@ -285,9 +289,11 @@ export async function enqueueOfflineCreate(
   }
   await db.transaction(
     'rw',
-    [db.transactions, db.shares, db.accounts, db.outbox],
+    [db.transactions, db.shares, db.accounts, db.places, db.outbox],
     async () => {
       await applyEcho(payload)
+      // El lugar queda sugerido al instante aunque aún no suba.
+      await touchLocalPlace(payload.place)
       await db.outbox.add({
         kind: OUTBOX_KIND_CREATE_TX,
         payload: JSON.stringify(payload),
@@ -297,6 +303,27 @@ export async function enqueueOfflineCreate(
     },
   )
   return { tempTxId }
+}
+
+/**
+ * Guarda el lugar en la copia local (espejo de `touchPlace` del
+ * servidor): la sugerencia aparece sin esperar la subida. Conserva la
+ * capitalización ya guardada; el servidor hace lo mismo al drenar la cola.
+ */
+async function touchLocalPlace(raw: string | null | undefined): Promise<void> {
+  const name = (raw ?? '').trim().slice(0, PLACE_MAX_LEN)
+  if (name.length < PLACE_MIN_LEN) return
+  const key = name.toLowerCase()
+  const prev: OfflinePlace | undefined = await db.places
+    .get(key)
+    .catch(() => undefined)
+  await db.places
+    .put({
+      key,
+      name: prev?.name ?? name,
+      lastUsedAt: new Date().toISOString(),
+    })
+    .catch(() => undefined)
 }
 
 function rebuildFormData(p: CreateTxPayload): FormData {
@@ -309,6 +336,7 @@ function rebuildFormData(p: CreateTxPayload): FormData {
   fd.set('accountId', p.accountId)
   if (p.transferToAccountId)
     fd.set('transferToAccountId', p.transferToAccountId)
+  if (p.place) fd.set('place', p.place)
   fd.set('installments', String(p.installments))
   if (p.isShared) {
     fd.set('isShared', 'true')

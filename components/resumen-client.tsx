@@ -4,8 +4,8 @@ import { useMemo, useState } from 'react'
 
 import { Check, HandCoins } from 'lucide-react'
 
-import type { MonthOpt } from '@/components/activity-client'
 import { AccountIcon } from '@/components/account-icon'
+import type { MonthOpt } from '@/components/activity-client'
 import {
   type CreditStatementView,
   CreditStatements,
@@ -20,11 +20,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
-import type { ActivityKind, ActivityRange } from '@/lib/activity-filters'
 import { byAccountOrder } from '@/lib/accounts'
+import type { ActivityKind, ActivityRange } from '@/lib/activity-filters'
 import { settleMonth } from '@/lib/calculations'
 import type { CatalogRow } from '@/lib/catalog'
 import { lookupCategory } from '@/lib/categories'
+import { extractPlaceSuffix } from '@/lib/place-format'
 import { useResumenFilters } from '@/lib/resumen-filters'
 import { formatMoney } from '@/lib/utils'
 import {
@@ -37,6 +38,7 @@ import {
 export type ResumenMineTx = {
   id: string
   type: 'EXPENSE' | 'INCOME'
+  concept: string
   category: string
   amount: number
   date: string // ISO
@@ -67,7 +69,8 @@ export type ResumenInvolvedTx = {
   }[]
 }
 
-type Sheet = null | 'kind' | 'range' | 'month' | 'account' | 'category'
+type Sheet =
+  null | 'kind' | 'range' | 'month' | 'account' | 'category' | 'place'
 
 const KINDS: { value: ActivityKind; label: string }[] = [
   { value: 'gastos', label: 'Gastos' },
@@ -127,11 +130,13 @@ export function ResumenClient({
   const range = useResumenFilters((s) => s.range)
   const account = useResumenFilters((s) => s.account)
   const category = useResumenFilters((s) => s.category)
+  const place = useResumenFilters((s) => s.place)
   const setMonth = useResumenFilters((s) => s.setMonth)
   const setKind = useResumenFilters((s) => s.setKind)
   const setRange = useResumenFilters((s) => s.setRange)
   const setAccount = useResumenFilters((s) => s.setAccount)
   const setCategory = useResumenFilters((s) => s.setCategory)
+  const setPlace = useResumenFilters((s) => s.setPlace)
 
   // El mes persistido puede no existir (p. ej. datos nuevos): se usa el más
   // reciente sin sobrescribir el store hasta que el usuario elija otro.
@@ -165,6 +170,11 @@ export function ResumenClient({
       if (!inKind(t)) return false
       if (account !== 'todas' && t.accountName !== account) return false
       if (category !== 'todas' && t.category !== category) return false
+      if (
+        place !== 'todos' &&
+        extractPlaceSuffix(t.concept)?.toLowerCase() !== place.toLowerCase()
+      )
+        return false
       return true
     })
     const map = new Map<string, number>()
@@ -180,7 +190,7 @@ export function ResumenClient({
         .sort((a, b) => b.value - a.value),
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rangeTxs, kind, account, category, cats])
+  }, [rangeTxs, kind, account, category, place, cats])
 
   // Opciones con totales (respetan el tipo activo), en orden global
   // (favorita primero, luego manual) con icono de cada cuenta.
@@ -210,6 +220,23 @@ export function ResumenClient({
       map.set(t.category, (map.get(t.category) ?? 0) + t.amount)
     }
     return [...map.entries()].sort((a, b) => b[1] - a[1])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeTxs, kind])
+
+  // Lugares del periodo (del sufijo "desc - lugar" de cada concepto):
+  // conteo calculado sobre movimientos, del tipo activo.
+  const placeOpts = useMemo(() => {
+    const map = new Map<string, { label: string; count: number }>()
+    for (const t of rangeTxs) {
+      if (!inKind(t)) continue
+      const suffix = extractPlaceSuffix(t.concept)
+      if (!suffix) continue
+      const key = suffix.toLowerCase()
+      const row = map.get(key)
+      if (row) row.count += 1
+      else map.set(key, { label: suffix, count: 1 })
+    }
+    return [...map.values()].sort((a, b) => b.count - a.count)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rangeTxs, kind])
 
@@ -278,6 +305,11 @@ export function ResumenClient({
           active={category !== 'todas'}
           onClick={() => setSheet('category')}
         />
+        <FilterPill
+          label={place === 'todos' ? 'Todos los lugares' : place}
+          active={place !== 'todos'}
+          onClick={() => setSheet('place')}
+        />
       </div>
 
       <Card>
@@ -333,6 +365,7 @@ export function ResumenClient({
               {sheet === 'month' && 'Seleccionar mes'}
               {sheet === 'account' && 'Filtrar por cuenta'}
               {sheet === 'category' && 'Filtrar por categoría'}
+              {sheet === 'place' && 'Filtrar por lugar'}
             </DialogTitle>
           </DialogHeader>
 
@@ -406,6 +439,23 @@ export function ResumenClient({
               }}
             />
           )}
+          {sheet === 'place' && (
+            <Options
+              items={[
+                { value: 'todos', label: 'Todos los lugares' },
+                ...placeOpts.map((p) => ({
+                  value: p.label,
+                  label: p.label,
+                  meta: `${p.count} ${p.count === 1 ? 'compra' : 'compras'}`,
+                })),
+              ]}
+              value={place}
+              onPick={(v) => {
+                setPlace(v)
+                close()
+              }}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -443,6 +493,7 @@ function Options({
     value: string
     label: string
     total?: number
+    meta?: string
     cap?: boolean
     iconType?: string
     iconColor?: string
@@ -468,6 +519,11 @@ function Options({
             </span>
             {it.total !== undefined && (
               <span className="text-sm font-bold">{formatMoney(it.total)}</span>
+            )}
+            {it.meta !== undefined && (
+              <span className="text-xs text-(--muted-foreground)">
+                {it.meta}
+              </span>
             )}
             {it.value === value && (
               <Check className="size-4 text-(--primary)" />
