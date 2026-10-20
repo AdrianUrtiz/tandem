@@ -1,6 +1,6 @@
 // Lugares de compra del usuario (autocompletado del formulario).
 //
-// El concepto guardado combina descripción + lugar ("Tortillas - Pollo
+// El concepto guardado combina descripción + lugar ej. ("Tortillas - Pollo
 // Feliz"); los lugares viven aparte para sugerirlos. Se guardan solos al
 // escribirlos (online en el server action, offline en la cola/Dexie).
 import {

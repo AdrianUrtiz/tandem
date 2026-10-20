@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import {
   ArrowLeftRight,
@@ -140,6 +140,17 @@ export function GroupExpenseForm({
     entry ? ymdOfWall(new Date(entry.date)) : todayMexicoYMD(),
   )
   const [sheet, setSheet] = useState<Sheet>(null)
+  const dateInputRef = useRef<HTMLInputElement>(null)
+
+  // En Chrome desktop el picker nativo solo abre al clickear el icono.
+  // Con showPicker() abre al clickear en cualquier parte del campo.
+  function openNativeDatePicker() {
+    try {
+      dateInputRef.current?.showPicker?.()
+    } catch {
+      // Sin soporte o picker ya abierto: el input sigue editable.
+    }
+  }
   const [payerId, setPayerId] = useState(
     () =>
       entry?.payerSeatId ??
@@ -632,13 +643,16 @@ export function GroupExpenseForm({
           </div>
           <Input
             type="date"
+            ref={dateInputRef}
             value={dateYMD}
+            onClick={openNativeDatePicker}
             onChange={(e) => {
               if (e.target.value) {
                 setDateYMD(e.target.value)
                 setSheet(null)
               }
             }}
+            className="cursor-pointer"
           />
         </div>
       </BottomSheet>

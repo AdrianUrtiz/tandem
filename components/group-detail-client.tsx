@@ -1303,7 +1303,7 @@ function SettlementSheet({
         <p className="text-xs text-(--muted-foreground)">
           {target.mode === 'confirm'
             ? `${target.fromName} dice que te pagó. Elige dónde lo recibiste.`
-            : `Liquidación neteada del grupo (resta ${formatMoney(maxAmount)} como máximo).`}
+            : `Liquidación del gasto (restan ${formatMoney(maxAmount)}).`}
         </p>
       </div>
       {target.mode !== 'confirm' && (

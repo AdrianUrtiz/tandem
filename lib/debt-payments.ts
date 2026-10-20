@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client'
+import type { Prisma } from '@/generated/prisma/client'
 
 import { fromCents, toCents } from '@/lib/money'
 import { prisma } from '@/lib/prisma'

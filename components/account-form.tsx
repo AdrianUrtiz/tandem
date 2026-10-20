@@ -209,9 +209,6 @@ export function AccountForm({
           />
           <div>
             <p className="text-sm font-semibold">Cuenta favorita</p>
-            <p className="text-xs text-(--muted-foreground)">
-              Va primera y se preselecciona en formularios
-            </p>
           </div>
         </div>
         <Switch

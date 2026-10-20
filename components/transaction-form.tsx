@@ -173,6 +173,7 @@ export function TransactionForm({
   // Foco al abrir el modal de descripción (input + teclado).
   const descRef = useRef<HTMLInputElement>(null)
   const placeRef = useRef<HTMLInputElement>(null)
+  const dateInputRef = useRef<HTMLInputElement>(null)
   const [accountId, setAccountId] = useState(
     entry?.accountId ?? accountOptions[0]?.id ?? '',
   )
@@ -346,6 +347,16 @@ export function TransactionForm({
   useEffect(() => {
     sliderRef.current?.scrollTo({ left: 0, behavior: 'smooth' })
   }, [category])
+
+  // En Chrome desktop el picker nativo solo abre al clickear el icono.
+  // Con showPicker() abre al clickear en cualquier parte del campo.
+  function openNativeDatePicker() {
+    try {
+      dateInputRef.current?.showPicker?.()
+    } catch {
+      // Sin soporte o picker ya abierto: el input sigue editable.
+    }
+  }
 
   const debits = accountOptions.filter((a) => a.type !== 'CREDIT')
   const hasTypes = accountOptions.some((a) => a.type)
@@ -1116,10 +1127,6 @@ export function TransactionForm({
                     maxLength={40}
                     autoComplete="off"
                   />
-                  <p className="text-[11px] text-(--muted-foreground)">
-                    Solo es un recordatorio para ti: no necesita cuenta y no le
-                    llegará ningún aviso.
-                  </p>
                 </div>
               )}
 
@@ -1243,7 +1250,7 @@ export function TransactionForm({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') placeRef.current?.focus()
                 }}
-                placeholder="Tortillas"
+                placeholder="Ej. Supermercado, Uber, Netflix…"
                 maxLength={60}
                 autoComplete="off"
                 className="h-12 text-base"
@@ -1353,15 +1360,18 @@ export function TransactionForm({
             <Label htmlFor="tx-date-pick">Otra fecha</Label>
             <Input
               id="tx-date-pick"
+              ref={dateInputRef}
               type="date"
               value={dateYMD}
               max={todayYMD}
+              onClick={openNativeDatePicker}
               onChange={(e) => {
                 if (e.target.value) {
                   setDateYMD(e.target.value)
                   setPanel(null)
                 }
               }}
+              className="cursor-pointer"
             />
           </div>
         </DialogContent>
