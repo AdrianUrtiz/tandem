@@ -36,11 +36,14 @@ export function AccountSwipeRow({
   open,
   onOpenChange,
   debitOptions = [],
+  onSelect,
 }: {
   a: AccountRow
   open: boolean
   onOpenChange: (open: boolean) => void
   debitOptions?: AccountOpt[]
+  /** Tap limpio en la tarjeta: abre el detalle. */
+  onSelect?: () => void
 }) {
   const router = useRouter()
   const [editOpen, setEditOpen] = useState(false)
@@ -94,6 +97,7 @@ export function AccountSwipeRow({
         disabled={editOpen || confirmOpen || payOpen || hiding}
         actionsWidth={224}
         leftActionsWidth={80}
+        onTap={onSelect}
         leftActions={
           a.type === 'CREDIT' ? (
             <button
@@ -210,10 +214,13 @@ export function HiddenAccountSwipeRow({
   a,
   open,
   onOpenChange,
+  onSelect,
 }: {
   a: AccountRow
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Tap limpio en la tarjeta: abre el detalle. */
+  onSelect?: () => void
 }) {
   const router = useRouter()
   const [showing, setShowing] = useState(false)
@@ -239,6 +246,7 @@ export function HiddenAccountSwipeRow({
       onOpenChange={onOpenChange}
       disabled={showing}
       actionsWidth={80}
+      onTap={onSelect}
       actions={
         <button
           type="button"
