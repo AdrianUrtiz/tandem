@@ -1,7 +1,8 @@
 import { PrismaPg } from '@prisma/adapter-pg'
-import { PrismaClient } from '@/generated/prisma/client'
 import bcrypt from 'bcryptjs'
 import 'dotenv/config'
+
+import { PrismaClient } from '@/generated/prisma/client'
 
 const adapter = new PrismaPg(process.env['DATABASE_URL'] ?? '')
 const prisma = new PrismaClient({ adapter })
@@ -129,6 +130,10 @@ async function main() {
   }
 
   // Usuarios alfa (alta manual; no hay registro público).
+  // NUNCA ejecutar en producción: el `update` reescribiría contraseñas reales.
+  if (process.env.VERCEL_ENV === 'production') {
+    throw new Error('db:seed está prohibido en producción')
+  }
   const password = await bcrypt.hash('tandem123', 10)
   const seeds = [
     { username: 'adrian', name: 'Adrián' },
@@ -139,10 +144,12 @@ async function main() {
     { username: 'pao', name: 'Pao' },
   ]
   for (const s of seeds) {
+    // El login compara en minúsculas (auth.ts): la escritura también normaliza.
+    const username = s.username.trim().toLowerCase()
     await prisma.user.upsert({
-      where: { username: s.username },
+      where: { username },
       update: { password, name: s.name },
-      create: { username: s.username, name: s.name, password },
+      create: { username, name: s.name, password },
     })
   }
 

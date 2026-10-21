@@ -27,10 +27,15 @@ enum TransactionType {
 
 model User {
   id        String   @id @default(cuid())
-  username  String   @unique
+  // CITEXT: la unicidad y comparación son case-insensitive a nivel DB
+  // (el login ya normaliza a minúsculas en la app).
+  username  String   @unique @db.Citext
   password  String // hash bcrypt (Auth.js Credentials)
   name      String
   avatar    String?
+  // Se incrementa al cambiar la contraseña: invalida los JWT emitidos antes
+  // (el callback `jwt` de Auth.js compara `token.sv` con este valor).
+  sessionVersion Int     @default(0)
   // Código personal de vínculo Q-XXXXXX (Ajustes > Pareja). Se genera al primer uso.
   pairCode  String?  @unique
   createdAt DateTime @default(now())

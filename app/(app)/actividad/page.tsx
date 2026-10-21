@@ -33,7 +33,11 @@ export default async function ActividadPage() {
   const [rows, partnerRows, accRows] = await Promise.all([
     prisma.transaction.findMany({
       where: { createdById: meId },
-      include: { account: true, createdBy: true, shares: true },
+      include: {
+        account: { select: { name: true, type: true } },
+        createdBy: { select: { name: true } },
+        shares: true,
+      },
       // Desempate por creación: varios movimientos pueden compartir fecha+hora
       // (mediodías fijos históricos, cargos de suscripción).
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
@@ -50,7 +54,7 @@ export default async function ActividadPage() {
         shares: { some: { debtorId: meId } },
       },
       include: {
-        createdBy: true,
+        createdBy: { select: { name: true } },
         shares: { where: { debtorId: meId } },
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
@@ -200,7 +204,7 @@ export default async function ActividadPage() {
       },
       include: {
         share: { include: { transaction: true } },
-        registeredBy: true,
+        registeredBy: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },
     }),
@@ -212,8 +216,14 @@ export default async function ActividadPage() {
         share: { debtorId: meId, transaction: { householdId: null } },
       },
       include: {
-        share: { include: { transaction: { include: { createdBy: true } } } },
-        registeredBy: true,
+        share: {
+          include: {
+            transaction: {
+              include: { createdBy: { select: { name: true } } },
+            },
+          },
+        },
+        registeredBy: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },
     }),
@@ -254,7 +264,7 @@ export default async function ActividadPage() {
   })
 
   // Solicitudes de vínculo de pareja pendientes (banner en Actividad).
-  const pairingInvites = await getPairingInvites(meId)
+  const pairingInvites = await getPairingInvites()
   // Recordatorio "Pagar a tu pareja": lo que YO debo de sus tarjetas
   // (mismo origen que Cuentas > Compartidos; sin datos de sus cuentas, solo
   // concepto, corte/límite y mi parte). Si no debo nada, lista vacía.
@@ -267,8 +277,10 @@ export default async function ActividadPage() {
       shares: { some: { debtorId: meId } },
     },
     include: {
-      account: true,
-      createdBy: true,
+      account: {
+        select: { id: true, name: true, type: true, dueDay: true, statementDay: true },
+      },
+      createdBy: { select: { name: true } },
       shares: { where: { debtorId: meId } },
     },
     orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],

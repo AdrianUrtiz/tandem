@@ -71,10 +71,11 @@ export async function renamePlace(formData: FormData) {
   })
   if (clash) return { error: 'Ya tienes un lugar con ese nombre' }
 
-  await prisma.place.update({
-    where: { id: row.id },
+  const placeWritten = await prisma.place.updateMany({
+    where: { id: row.id, userId },
     data: { name, key: newKey, lastUsedAt: new Date() },
   })
+  if (placeWritten.count === 0) return { error: 'Lugar no encontrado' }
   revalidateAll()
   return { ok: true as const }
 }
@@ -93,7 +94,10 @@ export async function deletePlace(rawKey: string) {
   })
   if (!row) return { error: 'Lugar no encontrado' }
 
-  await prisma.place.delete({ where: { id: row.id } })
+  const placeDeleted = await prisma.place.deleteMany({
+    where: { id: row.id, userId },
+  })
+  if (placeDeleted.count === 0) return { error: 'Lugar no encontrado' }
   revalidateAll()
   return { ok: true as const }
 }

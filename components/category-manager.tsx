@@ -92,20 +92,22 @@ export function CategoryManager({ cats }: { cats: CatalogRow[] }) {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-0.5">
-                  <button
-                    aria-label={`Editar ${c.name}`}
-                    onClick={() =>
-                      setEditing({
-                        id: c.id,
-                        name: c.name,
-                        iconName: c.iconName,
-                        color: c.color,
-                        kind: c.kind,
-                      })
-                    }
-                    className="rounded-full p-2 text-(--muted-foreground) hover:bg-(--muted) hover:text-(--foreground)">
-                    <Pencil className="size-4" />
-                  </button>
+                  {!c.isDefault && (
+                    <button
+                      aria-label={`Editar ${c.name}`}
+                      onClick={() =>
+                        setEditing({
+                          id: c.id,
+                          name: c.name,
+                          iconName: c.iconName,
+                          color: c.color,
+                          kind: c.kind,
+                        })
+                      }
+                      className="rounded-full p-2 text-(--muted-foreground) hover:bg-(--muted) hover:text-(--foreground)">
+                      <Pencil className="size-4" />
+                    </button>
+                  )}
                   {!c.isDefault && (
                     <button
                       aria-label={`Eliminar ${c.name}`}
@@ -122,7 +124,8 @@ export function CategoryManager({ cats }: { cats: CatalogRow[] }) {
       ))}
 
       <p className="text-center text-[11px] text-(--muted-foreground)">
-        Las del sistema se pueden editar (aplica a ambos), pero no eliminar
+        Las del sistema son de solo lectura; las tuyas se pueden editar y
+        eliminar
       </p>
 
       <AddFab label="Agregar categoría" onClick={() => setAddOpen(true)} />

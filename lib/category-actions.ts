@@ -95,14 +95,16 @@ export async function updateCategory(formData: FormData) {
   const v = parsed.data
   if (!ICONS[v.iconName]) return { error: 'Icono inválido' }
 
-  // Editable: propia o global por defecto (aplica a ambos miembros).
+  // Editable: solo la propia. Las globales del sistema (userId null) son de
+  // solo lectura desde la app: cualquier usuario podría renombrárselas a todos.
   const row = await prisma.category.findFirst({
-    where: { id: v.id, OR: [{ userId }, { userId: null }] },
+    where: { id: v.id, userId },
   })
   if (!row) return { error: 'Categoría no encontrada' }
 
-  await prisma.category.update({
-    where: { id: v.id },
+  // Editable: solo la propia (ver arriba).
+  const catWritten = await prisma.category.updateMany({
+    where: { id: v.id, userId },
     data: {
       name: v.name.trim(),
       iconName: v.iconName,
@@ -110,6 +112,7 @@ export async function updateCategory(formData: FormData) {
       kind: v.kind,
     },
   })
+  if (catWritten.count === 0) return { error: 'Categoría no encontrada' }
 
   revalidateAll()
   return { ok: true as const }
@@ -142,7 +145,10 @@ export async function deleteCategory(id: string) {
     }
   }
 
-  await prisma.category.delete({ where: { id } })
+  const catDeleted = await prisma.category.deleteMany({
+    where: { id: row.id, userId },
+  })
+  if (catDeleted.count === 0) return { error: 'Categoría no encontrada' }
   revalidateAll()
   return { ok: true as const }
 }

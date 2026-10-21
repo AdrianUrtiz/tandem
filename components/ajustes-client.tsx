@@ -67,10 +67,15 @@ export function AjustesClient({
   }
 
   async function handleSignOut() {
-    // No dejar datos locales al cerrar sesión (dispositivo compartido).
+    // No dejar datos locales al cerrar sesión (dispositivo compartido):
+    // se elimina la base local completa, no solo sus tablas.
     try {
-      const { clearLocalData } = await import('@/lib/offline/db')
-      await clearLocalData()
+      const { db, clearLocalData } = await import('@/lib/offline/db')
+      try {
+        await db.delete()
+      } catch {
+        await clearLocalData()
+      }
     } catch {
       // Se cierra sesión de todos modos.
     }
@@ -229,6 +234,10 @@ export function AjustesClient({
           className="flex w-full items-center justify-center gap-2 rounded-3xl border border-red-500/30 p-4 text-sm font-semibold text-red-500 transition active:scale-[.99]">
           <LogOut className="size-4" /> Cerrar sesión
         </button>
+        <p className="text-center text-[11px] text-(--muted-foreground)">
+          Al salir se borra la copia local. Evita usar la app en dispositivos
+          compartidos.
+        </p>
       </div>
     </div>
   )

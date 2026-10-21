@@ -37,6 +37,12 @@ function noDb() {
     : null
 }
 
+/** Solo mensajes conocidos al cliente; lo demás se generaliza. */
+function knownOr(e: unknown, known: string[], fallback: string): string {
+  const msg = e instanceof Error ? e.message : ''
+  return known.includes(msg) ? msg : fallback
+}
+
 type OwningAccount = { id: string; type: string }
 
 /**
@@ -114,11 +120,10 @@ export async function registerPayment(formData: FormData) {
   const debtorId = share.debtorId ?? share.seat?.userId ?? null
   const creditorId = tx.createdById
   const isCreditor = userId === creditorId
+  // Mensaje único para "no existe" y "no participas": no dar oráculo de
+  // existencia de deudas ajenas.
   if (!isCreditor && userId !== debtorId) {
-    // Seat de grupo sin reclamar: nadie (salvo el acreedor) puede actuar.
-    if (!debtorId && share.seatId && !share.externalName)
-      return { error: 'Ese lugar aún no fue reclamado' }
-    return { error: 'No participas en esta deuda' }
+    return { error: 'Aportación no encontrada' }
   }
   const debtorName =
     share.debtor?.name ??
@@ -301,8 +306,10 @@ export async function confirmPayment(formData: FormData) {
         accountId: v.accountId,
         userId,
       })
-      await db.debtPayment.update({
-        where: { id: p.id },
+      // Confirmación atómica: si otra confirmación concurrente ya la atendió,
+      // `count` es 0 y la transacción revierte también el ingreso creado arriba.
+      const confirmed = await db.debtPayment.updateMany({
+        where: { id: p.id, status: 'PENDING' },
         data: {
           status: 'CONFIRMED',
           confirmedById: userId,
@@ -318,10 +325,24 @@ export async function confirmPayment(formData: FormData) {
             : {}),
         },
       })
+      if (confirmed.count === 0) throw new Error('Este pago ya fue atendido')
       await syncSubscriptionCheck(db, p.shareId, p.month, userId)
     })
   } catch (e) {
-    return { error: e instanceof Error ? e.message : 'No se pudo confirmar' }
+    const msg = e instanceof Error ? e.message : ''
+    return {
+      error: [
+        'Pago no encontrado',
+        'Este pago ya fue atendido',
+        'Solo quien recibe puede confirmar',
+        'No puedes confirmar tu propio registro',
+        'El monto excede lo restante de la parcialidad',
+        'Los grupos se liquidan por neto en Pagos sugeridos',
+        'Este grupo está cerrado',
+      ].includes(msg)
+        ? msg
+        : 'No se pudo confirmar',
+    }
   }
   revalidateDebts()
   return { ok: true }
@@ -347,12 +368,34 @@ export async function rejectPayment(paymentId: string) {
   ) {
     return { error: 'Solo quien recibe puede rechazar' }
   }
-  await prisma.$transaction(async (db) => {
-    await db.debtPayment.delete({ where: { id: p.id } })
-    if (p.transactionId) {
-      await db.transaction.deleteMany({ where: { id: p.transactionId } })
+  try {
+    await prisma.$transaction(async (db) => {
+      // Borrado atómico con predicado de permiso: solo el acreedor rechaza un
+      // pendiente que no registró él. Si cambió entre la lectura y el borrado,
+      // `count` es 0 y no se toca nada.
+      const deleted = await db.debtPayment.deleteMany({
+        where: {
+          id: p.id,
+          status: 'PENDING',
+          registeredById: { not: userId },
+          share: { transaction: { createdById: userId } },
+        },
+      })
+      if (deleted.count === 0)
+        throw new Error('Solo quien recibe puede rechazar')
+      if (p.transactionId) {
+        await db.transaction.deleteMany({ where: { id: p.transactionId } })
+      }
+    })
+  } catch (e) {
+    return {
+      error: knownOr(
+        e,
+        ['Solo quien recibe puede rechazar'],
+        'No se pudo rechazar',
+      ),
     }
-  })
+  }
   revalidateDebts()
   return { ok: true }
 }
@@ -370,12 +413,28 @@ export async function cancelPayment(paymentId: string) {
     return { error: 'Solo quien registró puede cancelar' }
   if (p.status !== 'PENDING')
     return { error: 'Solo se puede cancelar un pago pendiente' }
-  await prisma.$transaction(async (db) => {
-    await db.debtPayment.delete({ where: { id: p.id } })
-    if (p.transactionId) {
-      await db.transaction.deleteMany({ where: { id: p.transactionId } })
+  try {
+    await prisma.$transaction(async (db) => {
+      // Borrado atómico con predicado de permiso: solo el registrante cancela
+      // su propio pendiente.
+      const deleted = await db.debtPayment.deleteMany({
+        where: { id: p.id, status: 'PENDING', registeredById: userId },
+      })
+      if (deleted.count === 0)
+        throw new Error('Solo se puede cancelar un pago pendiente')
+      if (p.transactionId) {
+        await db.transaction.deleteMany({ where: { id: p.transactionId } })
+      }
+    })
+  } catch (e) {
+    return {
+      error: knownOr(
+        e,
+        ['Solo se puede cancelar un pago pendiente'],
+        'No se pudo cancelar',
+      ),
     }
-  })
+  }
   revalidateDebts()
   return { ok: true }
 }

@@ -40,7 +40,7 @@ export async function changePassword(formData: FormData) {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, password: true },
+    select: { id: true, username: true, password: true },
   })
   if (!user) return { error: 'Usuario no encontrado' }
   const ok = await bcrypt.compare(v.current, user.password)
@@ -48,7 +48,24 @@ export async function changePassword(formData: FormData) {
 
   await prisma.user.update({
     where: { id: userId },
-    data: { password: await bcrypt.hash(v.next, 10) },
+    // Rota la contraseña e invalida los JWT emitidos antes (ver auth.ts).
+    data: {
+      password: await bcrypt.hash(v.next, 10),
+      sessionVersion: { increment: 1 },
+    },
   })
+  // Re-emite el JWT de ESTE dispositivo con la nueva versión: los demás
+  // quedan invalidados, este sigue en sesión. Si falla, el usuario entra
+  // de nuevo manualmente.
+  try {
+    const { signIn } = await import('@/auth')
+    await signIn('credentials', {
+      username: user.username,
+      password: v.next,
+      redirect: false,
+    })
+  } catch {
+    // La contraseña ya cambió; solo falta renovar la cookie.
+  }
   return { ok: true }
 }

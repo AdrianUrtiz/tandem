@@ -20,6 +20,18 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Variables de entorno
+
+Ver `.env.example`. En Vercel se definen por entorno (dev/preview/prod):
+
+- `DATABASE_URL` (Neon, obligatoria).
+- `AUTH_SECRET`, `AUTH_URL` (Auth.js, obligatorias en producción).
+- `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` (rate-limit en
+  producción; en local se usa memoria sin necesidad de configurar nada).
+
+`npx prisma migrate deploy` corre en el build de Vercel antes de compilar.
+`npm run db:seed` está prohibido en producción (lanza error).
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

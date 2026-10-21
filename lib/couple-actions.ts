@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { getOrCreatePairCode, normalizeCode } from '@/lib/households'
 import { prisma } from '@/lib/prisma'
+import { CODES_MAX, CODES_WINDOW_MS, checkLimit } from '@/lib/rate-limit'
 
 import { auth } from '@/auth'
 
@@ -49,9 +50,9 @@ export type PairingInviteRow = {
 }
 
 /** Solicitudes de vínculo pendientes para mí (serializable, sin montos). */
-export async function getPairingInvites(
-  userId: string,
-): Promise<PairingInviteRow[]> {
+export async function getPairingInvites(): Promise<PairingInviteRow[]> {
+  const userId = authedUserId(await auth())
+  if (!userId) return []
   if (!process.env.DATABASE_URL) return []
   await expireStale()
   const rows = await prisma.coupleInvite.findMany({
@@ -126,6 +127,15 @@ export async function requestPairing(rawCode: string) {
   const userId = authedUserId(await auth())
   if (!userId) return { error: 'No autenticado' }
   if (!process.env.DATABASE_URL) return { error: 'Configura DATABASE_URL' }
+
+  // Enumeración de códigos: 10 intentos / 10 min por usuario.
+  const limited = await checkLimit(
+    'codes',
+    `${userId}:request`,
+    CODES_MAX,
+    CODES_WINDOW_MS,
+  )
+  if (!limited.ok) return { error: 'Demasiados intentos, espera unos minutos' }
 
   const code = normalizeCode(rawCode)
   if (!code || !code.startsWith('Q-'))
@@ -221,43 +231,53 @@ export async function acceptPairing(inviteId: string) {
     select: { name: true },
   })
 
-  await prisma.$transaction(async (db) => {
-    const household = await db.household.create({
-      data: {
-        kind: 'COUPLE',
-        createdById: userId,
-      },
-    })
-    await db.householdMember.createMany({
-      data: [
-        {
-          householdId: household.id,
-          userId: invite.fromUserId,
-          displayName: invite.fromUser.name,
+  try {
+    await prisma.$transaction(async (db) => {
+      // Re-verificación dentro de la transacción: la invitación sigue pendiente
+      // y dirigida a mí. Doble aceptación concurrente: la segunda ve count 0.
+      const accepted = await db.coupleInvite.updateMany({
+        where: { id: invite.id, status: 'PENDING', toUserId: userId },
+        data: { status: 'ACCEPTED' },
+      })
+      if (accepted.count === 0) throw new Error('Solicitud no encontrada')
+      const household = await db.household.create({
+        data: {
+          kind: 'COUPLE',
+          createdById: userId,
         },
-        {
-          householdId: household.id,
-          userId,
-          displayName: me?.name ?? 'Yo',
-        },
-      ],
-    })
-    await db.coupleInvite.update({
-      where: { id: invite.id },
-      data: { status: 'ACCEPTED' },
-    })
-    // Limpia otras pendientes cruzadas entre ambos.
-    await db.coupleInvite.updateMany({
-      where: {
-        status: 'PENDING',
-        OR: [
-          { fromUserId: userId, toUserId: invite.fromUserId },
-          { fromUserId: invite.fromUserId, toUserId: userId },
+      })
+      await db.householdMember.createMany({
+        data: [
+          {
+            householdId: household.id,
+            userId: invite.fromUserId,
+            displayName: invite.fromUser.name,
+          },
+          {
+            householdId: household.id,
+            userId,
+            displayName: me?.name ?? 'Yo',
+          },
         ],
-      },
-      data: { status: 'REJECTED' },
+      })
+      // Limpia otras pendientes cruzadas entre ambos.
+      await db.coupleInvite.updateMany({
+        where: {
+          status: 'PENDING',
+          OR: [
+            { fromUserId: userId, toUserId: invite.fromUserId },
+            { fromUserId: invite.fromUserId, toUserId: userId },
+          ],
+        },
+        data: { status: 'REJECTED' },
+      })
     })
-  })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : ''
+    return {
+      error: msg === 'Solicitud no encontrada' ? msg : 'No se pudo aceptar',
+    }
+  }
 
   revalidateAll()
   return { ok: true }
@@ -271,10 +291,11 @@ export async function rejectPairing(inviteId: string) {
     select: { id: true },
   })
   if (!invite) return { error: 'Solicitud no encontrada' }
-  await prisma.coupleInvite.update({
-    where: { id: invite.id },
+  const rejected = await prisma.coupleInvite.updateMany({
+    where: { id: invite.id, status: 'PENDING', toUserId: userId },
     data: { status: 'REJECTED' },
   })
+  if (rejected.count === 0) return { error: 'Solicitud no encontrada' }
   revalidateAll()
   return { ok: true }
 }
@@ -287,10 +308,11 @@ export async function cancelPairing(inviteId: string) {
     select: { id: true },
   })
   if (!invite) return { error: 'Solicitud no encontrada' }
-  await prisma.coupleInvite.update({
-    where: { id: invite.id },
+  const cancelled = await prisma.coupleInvite.updateMany({
+    where: { id: invite.id, status: 'PENDING', fromUserId: userId },
     data: { status: 'REJECTED' },
   })
+  if (cancelled.count === 0) return { error: 'Solicitud no encontrada' }
   revalidateAll()
   return { ok: true }
 }
@@ -308,8 +330,15 @@ export async function unlinkCouple() {
   if (!membership) return { error: 'No tienes pareja vinculada' }
 
   // Las transacciones de pareja tienen householdId null (legacy): el historial
-  // queda intacto. Solo se borra el vínculo.
-  await prisma.household.delete({ where: { id: membership.householdId } })
+  // queda intacto. Solo se borra el vínculo, con predicado de pertenencia.
+  const unlinked = await prisma.household.deleteMany({
+    where: {
+      id: membership.householdId,
+      kind: 'COUPLE',
+      members: { some: { userId } },
+    },
+  })
+  if (unlinked.count === 0) return { error: 'No tienes pareja vinculada' }
   revalidateAll()
   return { ok: true }
 }

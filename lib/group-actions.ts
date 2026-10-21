@@ -14,6 +14,7 @@ import {
 import { newGroupCode, normalizeCode } from '@/lib/households'
 import { fromCents, moneySchema, toCents } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
+import { CODES_MAX, CODES_WINDOW_MS, checkLimit } from '@/lib/rate-limit'
 import { monthLabelEs } from '@/lib/utils'
 import { parseWallInput } from '@/lib/walltime'
 
@@ -166,6 +167,13 @@ export async function previewGroup(
 ): Promise<{ error: string } | (GroupPreview & { ok: true })> {
   const userId = meIdOf(await auth())
   if (!userId) return { error: 'No autenticado' }
+  const limited = await checkLimit(
+    'codes',
+    `${userId}:preview`,
+    CODES_MAX,
+    CODES_WINDOW_MS,
+  )
+  if (!limited.ok) return { error: 'Demasiados intentos, espera unos minutos' }
   const code = normalizeCode(rawCode)
   if (!code || !code.startsWith('G-'))
     return { error: 'Código inválido (G-XXXXXX)' }
@@ -202,6 +210,14 @@ export async function claimSeat(memberId: string) {
   const userId = meIdOf(await auth())
   if (!userId) return { error: 'No autenticado' }
   if (!process.env.DATABASE_URL) return { error: 'Configura DATABASE_URL' }
+  const limitedClaim = await checkLimit(
+    'codes',
+    `${userId}:claim`,
+    CODES_MAX,
+    CODES_WINDOW_MS,
+  )
+  if (!limitedClaim.ok)
+    return { error: 'Demasiados intentos, espera unos minutos' }
 
   const seat = await prisma.householdMember.findUnique({
     where: { id: memberId },
@@ -263,6 +279,14 @@ export async function joinGroupAsNew(rawCode: string) {
   const userId = meIdOf(await auth())
   if (!userId) return { error: 'No autenticado' }
   if (!process.env.DATABASE_URL) return { error: 'Configura DATABASE_URL' }
+  const limitedJoin = await checkLimit(
+    'codes',
+    `${userId}:join`,
+    CODES_MAX,
+    CODES_WINDOW_MS,
+  )
+  if (!limitedJoin.ok)
+    return { error: 'Demasiados intentos, espera unos minutos' }
   const code = normalizeCode(rawCode)
   if (!code || !code.startsWith('G-'))
     return { error: 'Código inválido (G-XXXXXX)' }
@@ -398,10 +422,19 @@ export async function renameGroupSeat(memberId: string, rawName: string) {
   })
   if (clash) return { error: 'Ese nombre ya está en el grupo' }
 
-  await prisma.householdMember.update({
-    where: { id: seat.id },
+  const renamed = await prisma.householdMember.updateMany({
+    where: {
+      id: seat.id,
+      householdId: seat.householdId,
+      household: {
+        kind: 'GROUP',
+        status: 'ACTIVE',
+        createdById: userId,
+      },
+    },
     data: { displayName: name },
   })
+  if (renamed.count === 0) return { error: 'Lugar no encontrado' }
   revalidateAll()
   return { ok: true as const }
 }
@@ -429,7 +462,18 @@ export async function removeGroupSeat(memberId: string) {
   if (await groupHasExpenses(seat.householdId))
     return { error: 'Ya hay gastos: los nombres quedan fijos' }
 
-  await prisma.householdMember.delete({ where: { id: seat.id } })
+  const seatRemoved = await prisma.householdMember.deleteMany({
+    where: {
+      id: seat.id,
+      householdId: seat.householdId,
+      household: {
+        kind: 'GROUP',
+        status: 'ACTIVE',
+        createdById: userId,
+      },
+    },
+  })
+  if (seatRemoved.count === 0) return { error: 'Lugar no encontrado' }
   revalidateAll()
   return { ok: true as const }
 }
@@ -773,45 +817,73 @@ export async function updateGroupExpense(formData: FormData) {
 
   const payerChanged = (tx.paidBySeatId ?? null) !== payerSeat.id
 
-  await prisma.$transaction(async (db) => {
-    if (tx.payerTransactionId) {
-      if (payerChanged) {
-        // El espejo era del pagador anterior: su premisa queda sin efecto.
-        await db.transaction.deleteMany({
-          where: { id: tx.payerTransactionId },
-        })
-      } else {
-        await db.transaction.updateMany({
-          where: { id: tx.payerTransactionId },
-          data: header,
-        })
-      }
-    }
-    await db.transaction.update({
-      where: { id: tx.id },
-      data: {
-        ...header,
-        paidBySeatId: payerSeat.id,
-        payerTransactionId: payerChanged ? null : tx.payerTransactionId,
-      },
-    })
-    await db.transactionShare.deleteMany({
-      where: { transactionId: tx.id },
-    })
-    for (const part of debtorParts) {
-      const seat = seats.find((s) => s.id === part.seatId)!
-      await db.transactionShare.create({
-        data: {
-          transactionId: tx.id,
-          debtorId: seat.userId,
-          seatId: seat.id,
-          sharePct: (toCents(part.total) / totalC) * 100,
-          monthlyAmount: part.monthly,
-          isFixedAmount: v.splitMode === 'custom',
+  try {
+    await prisma.$transaction(async (db) => {
+      // Re-verificación dentro de la transacción:permiso y grupo abierto.
+      const fresh = await db.transaction.findUnique({
+        where: { id: tx.id },
+        select: {
+          createdById: true,
+          householdId: true,
+          paidBySeat: { select: { userId: true } },
+          household: { select: { status: true } },
         },
       })
+      const freshOk =
+        fresh != null &&
+        fresh.householdId === v.householdId &&
+        fresh.household?.status === 'ACTIVE' &&
+        (fresh.createdById === userId ||
+          (fresh.paidBySeat?.userId ?? null) === userId)
+      if (!freshOk) throw new Error('Gasto no encontrado')
+      if (tx.payerTransactionId) {
+        if (payerChanged) {
+          // El espejo era del pagador anterior: su premisa queda sin efecto.
+          await db.transaction.deleteMany({
+            where: { id: tx.payerTransactionId },
+          })
+        } else {
+          await db.transaction.updateMany({
+            where: { id: tx.payerTransactionId },
+            data: header,
+          })
+        }
+      }
+      const txUpdated = await db.transaction.updateMany({
+        where: {
+          id: tx.id,
+          OR: [{ createdById: userId }, { paidBySeat: { userId } }],
+        },
+        data: {
+          ...header,
+          paidBySeatId: payerSeat.id,
+          payerTransactionId: payerChanged ? null : tx.payerTransactionId,
+        },
+      })
+      if (txUpdated.count === 0) throw new Error('Gasto no encontrado')
+      await db.transactionShare.deleteMany({
+        where: { transactionId: tx.id },
+      })
+      for (const part of debtorParts) {
+        const seat = seats.find((s) => s.id === part.seatId)!
+        await db.transactionShare.create({
+          data: {
+            transactionId: tx.id,
+            debtorId: seat.userId,
+            seatId: seat.id,
+            sharePct: (toCents(part.total) / totalC) * 100,
+            monthlyAmount: part.monthly,
+            isFixedAmount: v.splitMode === 'custom',
+          },
+        })
+      }
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : ''
+    return {
+      error: msg === 'Gasto no encontrado' ? msg : 'No se pudo actualizar',
     }
-  })
+  }
   revalidateAll()
   return { ok: true as const }
 }
@@ -926,7 +998,12 @@ export type GroupDetail = {
       /** Cuota mensual de este deudor (= parte total / meses). */
       monthly: number
       /** Meses con su abono confirmado/pendiente (uno por parcialidad). */
-      months: { payKey: string; monthLabel: string; paid: number; pending: number }[]
+      months: {
+        payKey: string
+        monthLabel: string
+        paid: number
+        pending: number
+      }[]
       paid: number
       pending: number
       isMine: boolean
@@ -1123,8 +1200,7 @@ export async function getGroupDetail(
         if (s.seatId) {
           owedBySeat.set(
             s.seatId,
-            (owedBySeat.get(s.seatId) ?? 0) +
-              Number(s.monthlyAmount) * n,
+            (owedBySeat.get(s.seatId) ?? 0) + Number(s.monthlyAmount) * n,
           )
         }
         const seatName = s.seat?.displayName ?? s.debtor?.name ?? 'Lugar'
@@ -1163,7 +1239,7 @@ export async function getGroupDetail(
 
   // Balance NETO por seat (pagado − consumido ± liquidaciones confirmadas).
   const nets = await getGroupNets(householdId)
-  const settlements = await getGroupSettlementPendings(householdId, userId)
+  const settlements = await getGroupSettlementPendings(householdId)
   return {
     ok: true,
     id: h.id,
@@ -1208,10 +1284,13 @@ export type GroupSummary = {
   expenseCount: number
 }
 
-/** Resúmenes de mis grupos para la tab Compartidos (tarjetas). */
-export async function getGroupSummaries(
-  userId: string,
-): Promise<GroupSummary[]> {
+/**
+ * Resúmenes de mis grupos para la tab Compartidos (tarjetas).
+ * El usuario siempre sale de la sesión validada; nunca se acepta como parámetro.
+ */
+export async function getGroupSummaries(): Promise<GroupSummary[]> {
+  const userId = meIdOf(await auth())
+  if (!userId) return []
   if (!process.env.DATABASE_URL) return []
   const memberships = await prisma.householdMember.findMany({
     where: { userId, household: { kind: 'GROUP' } },
@@ -1272,10 +1351,11 @@ export async function closeGroup(householdId: string) {
   if (rest > 0)
     return { error: 'Aún hay saldos por liquidar para cerrar el grupo' }
 
-  await prisma.household.update({
-    where: { id: householdId },
+  const closed = await prisma.household.updateMany({
+    where: { id: householdId, createdById: userId },
     data: { status: 'CLOSED' },
   })
+  if (closed.count === 0) return { error: 'Solo el creador cierra el grupo' }
   revalidateAll()
   return { ok: true as const }
 }
@@ -1292,10 +1372,11 @@ export async function reopenGroup(householdId: string) {
     return { error: 'Solo el creador reabre el grupo' }
   if (group.household.status === 'ACTIVE') return { ok: true as const }
 
-  await prisma.household.update({
-    where: { id: householdId },
+  const reopened = await prisma.household.updateMany({
+    where: { id: householdId, createdById: userId },
     data: { status: 'ACTIVE' },
   })
+  if (reopened.count === 0) return { error: 'Solo el creador reabre el grupo' }
   revalidateAll()
   return { ok: true as const }
 }
@@ -1332,29 +1413,47 @@ export async function deleteGroup(householdId: string) {
     : []
   const shareIds = shares.map((s) => s.id)
 
-  await prisma.$transaction(async (db) => {
-    // Las liquidaciones neteadas se borran; sus movimientos personales
-    // (ingresos/egresos de cada quien) se conservan como historial.
-    await db.groupSettlement.deleteMany({ where: { householdId } })
-    // Los pagos ligados se borran; sus movimientos de dinero quedan como
-    // movimientos personales normales (ya eran tuyos).
-    if (shareIds.length > 0) {
-      await db.debtPayment.deleteMany({
-        where: { shareId: { in: shareIds } },
+  try {
+    await prisma.$transaction(async (db) => {
+      // Re-verificación dentro de la transacción: si la autoría cambió entre la
+      // lectura y el borrado, se aborta sin tocar nada.
+      const owner = await db.household.findUnique({
+        where: { id: householdId },
+        select: { createdById: true },
       })
-      await db.transactionShare.deleteMany({
-        where: { id: { in: shareIds } },
-      })
+      if (!owner || owner.createdById !== userId)
+        throw new Error('Solo el creador elimina el grupo')
+      // Las liquidaciones neteadas se borran; sus movimientos personales
+      // (ingresos/egresos de cada quien) se conservan como historial.
+      await db.groupSettlement.deleteMany({ where: { householdId } })
+      // Los pagos ligados se borran; sus movimientos de dinero quedan como
+      // movimientos personales normales (ya eran tuyos).
+      if (shareIds.length > 0) {
+        await db.debtPayment.deleteMany({
+          where: { shareId: { in: shareIds } },
+        })
+        await db.transactionShare.deleteMany({
+          where: { id: { in: shareIds } },
+        })
+      }
+      if (txIds.length > 0) {
+        await db.transaction.updateMany({
+          where: { id: { in: txIds } },
+          data: { householdId: null, isShared: false },
+        })
+      }
+      await db.householdMember.deleteMany({ where: { householdId } })
+      await db.household.delete({ where: { id: householdId } })
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : ''
+    return {
+      error:
+        msg === 'Solo el creador elimina el grupo'
+          ? msg
+          : 'No se pudo eliminar',
     }
-    if (txIds.length > 0) {
-      await db.transaction.updateMany({
-        where: { id: { in: txIds } },
-        data: { householdId: null, isShared: false },
-      })
-    }
-    await db.householdMember.deleteMany({ where: { householdId } })
-    await db.household.delete({ where: { id: householdId } })
-  })
+  }
   revalidateAll()
   return { ok: true as const }
 }

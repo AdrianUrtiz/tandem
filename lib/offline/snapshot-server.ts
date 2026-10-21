@@ -65,7 +65,8 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
   ] = await Promise.all([
     prisma.account.findMany({
       where: { isActive: true, userId },
-      include: { user: true },
+      // Mínimo necesario: nombre del dueño para la UI; jamás el hash.
+      include: { user: { select: { id: true, name: true } } },
       orderBy: [
         { isFavorite: 'desc' },
         { position: 'asc' },
@@ -75,7 +76,7 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
     getAccountBalances(userId),
     getCatalog(userId),
     getCardPayCandidates(userId),
-    getSubscriptionData(userId),
+    getSubscriptionData(),
     prisma.user.findUnique({
       where: { id: userId },
       select: { name: true },
@@ -91,7 +92,7 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
       })
     : null
   const partner = partnerRow ?? null
-  const groups = await getGroupSummaries(userId)
+  const groups = await getGroupSummaries()
 
   const accounts: OfflineAccount[] = accRows.map((a) => ({
     id: a.id,
@@ -116,10 +117,23 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
   const accById = new Map(accRows.map((a) => [a.id, a]))
 
   // — Movimientos míos (ventana + MSI viejos aún exigibles) —
+  // Selects mínimos: nunca se carga el hash de contraseña a memoria.
   const [mineRecent, mineOldMsi] = await Promise.all([
     prisma.transaction.findMany({
       where: { createdById: userId, date: { gte: cutoff } },
-      include: { account: true, createdBy: true, shares: true },
+      include: {
+        account: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            statementDay: true,
+            dueDay: true,
+          },
+        },
+        createdBy: { select: { name: true } },
+        shares: true,
+      },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),
     prisma.transaction.findMany({
@@ -129,7 +143,19 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
         installments: { gt: 1 },
         date: { gte: msiFloor, lt: cutoff },
       },
-      include: { account: true, createdBy: true, shares: true },
+      include: {
+        account: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            statementDay: true,
+            dueDay: true,
+          },
+        },
+        createdBy: { select: { name: true } },
+        shares: true,
+      },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),
   ])
@@ -155,8 +181,16 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
         shares: { some: { debtorId: userId } },
       },
       include: {
-        account: true,
-        createdBy: true,
+        account: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            statementDay: true,
+            dueDay: true,
+          },
+        },
+        createdBy: { select: { id: true, name: true } },
         shares: { where: { debtorId: userId } },
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
@@ -172,8 +206,16 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
         shares: { some: { debtorId: userId } },
       },
       include: {
-        account: true,
-        createdBy: true,
+        account: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            statementDay: true,
+            dueDay: true,
+          },
+        },
+        createdBy: { select: { id: true, name: true } },
         shares: { where: { debtorId: userId } },
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
@@ -199,9 +241,22 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
       },
     },
     include: {
-      account: true,
-      createdBy: true,
-      shares: { include: { debtor: true, seat: true } },
+      account: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          statementDay: true,
+          dueDay: true,
+        },
+      },
+      createdBy: { select: { name: true } },
+      shares: {
+        include: {
+          debtor: { select: { id: true, name: true } },
+          seat: { select: { id: true, displayName: true, userId: true } },
+        },
+      },
     },
     orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
   })
@@ -277,7 +332,10 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
     mySharedIds.length > 0
       ? await prisma.transactionShare.findMany({
           where: { transactionId: { in: mySharedIds } },
-          include: { debtor: true, seat: true },
+          include: {
+            debtor: { select: { name: true } },
+            seat: { select: { displayName: true } },
+          },
         })
       : []
   const shares: SnapshotPayload['shares'] = [
@@ -334,11 +392,13 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
       include: {
         share: {
           include: {
-            transaction: { include: { createdBy: true } },
-            debtor: true,
+            transaction: {
+              include: { createdBy: { select: { name: true } } },
+            },
+            debtor: { select: { name: true } },
           },
         },
-        registeredBy: true,
+        registeredBy: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },
     }),
@@ -350,8 +410,14 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
         share: { debtorId: userId, transaction: { householdId: null } },
       },
       include: {
-        share: { include: { transaction: { include: { createdBy: true } } } },
-        registeredBy: true,
+        share: {
+          include: {
+            transaction: {
+              include: { createdBy: { select: { name: true } } },
+            },
+          },
+        },
+        registeredBy: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },
     }),

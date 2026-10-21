@@ -146,8 +146,8 @@ export async function updateSubscription(formData: FormData) {
   if ('error' in parts) return { error: parts.error }
 
   // Solo afecta cargos futuros: lo ya confirmado es inmutable.
-  await prisma.subscription.update({
-    where: { id: v.id },
+  const subWritten = await prisma.subscription.updateMany({
+    where: { id: v.id, userId },
     data: {
       name: v.name.trim(),
       amount: v.amount,
@@ -160,6 +160,7 @@ export async function updateSubscription(formData: FormData) {
       externalName: v.isShared ? (v.externalName ?? null) : null,
     },
   })
+  if (subWritten.count === 0) return { error: 'Suscripción no encontrada' }
 
   revalidateAll()
   return { ok: true }
@@ -173,10 +174,11 @@ export async function toggleSubscription(id: string, active: boolean) {
   const sub = await prisma.subscription.findFirst({ where: { id, userId } })
   if (!sub) return { error: 'Suscripción no encontrada' }
 
-  await prisma.subscription.update({
-    where: { id },
+  const toggled = await prisma.subscription.updateMany({
+    where: { id, userId },
     data: { isActive: active },
   })
+  if (toggled.count === 0) return { error: 'Suscripción no encontrada' }
   revalidateAll()
   return { ok: true }
 }
@@ -190,7 +192,10 @@ export async function deleteSubscription(id: string) {
   if (!sub) return { error: 'Suscripción no encontrada' }
 
   // Los cargos ya confirmados se conservan como movimientos normales.
-  await prisma.subscription.delete({ where: { id } })
+  const subDeleted = await prisma.subscription.deleteMany({
+    where: { id, userId },
+  })
+  if (subDeleted.count === 0) return { error: 'Suscripción no encontrada' }
   revalidateAll()
   return { ok: true }
 }
@@ -372,7 +377,16 @@ export async function unskipSubscriptionCharge(
   if (!existing || !existing.skipped || existing.transactionId) {
     return { error: 'Ese mes no está marcado como no cobrado' }
   }
-  await prisma.subscriptionCharge.delete({ where: { id: existing.id } })
+  const unskipped = await prisma.subscriptionCharge.deleteMany({
+    where: {
+      id: existing.id,
+      skipped: true,
+      transactionId: null,
+      subscription: { id: subscriptionId, userId },
+    },
+  })
+  if (unskipped.count === 0)
+    return { error: 'Ese mes no está marcado como no cobrado' }
 
   revalidateAll()
   return { ok: true }
@@ -411,10 +425,13 @@ export type SubFull = {
 /**
  * Todo lo de suscripciones para un usuario en una sola llamada: plantillas
  * propias + compartidas de la pareja (sin saldos ajenos) y cargos pendientes.
+ * El usuario siempre sale de la sesión validada; nunca se acepta como parámetro.
  */
-export async function getSubscriptionData(
-  userId: string,
-): Promise<{ subs: SubFull[]; dues: DueCharge[] }> {
+export async function getSubscriptionData(): Promise<{
+  subs: SubFull[]
+  dues: DueCharge[]
+}> {
+  const userId = authedUser(await auth())
   if (!process.env.DATABASE_URL || !userId) return { subs: [], dues: [] }
   try {
     const { getPartnerId } = await import('@/lib/households')

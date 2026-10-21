@@ -246,8 +246,10 @@ export async function confirmSettlement(
           isShared: false,
         },
       })
-      await db.groupSettlement.update({
-        where: { id: st.id },
+      // Confirmación atómica: si otra confirmación concurrente ya la atendió,
+      // `count` es 0 y se aborta sin duplicar el ingreso.
+      const confirmed = await db.groupSettlement.updateMany({
+        where: { id: st.id, status: 'PENDING' },
         data: {
           status: 'CONFIRMED',
           confirmedById: userId,
@@ -263,9 +265,23 @@ export async function confirmSettlement(
             : {}),
         },
       })
+      if (confirmed.count === 0)
+        throw new Error('Esta liquidación ya fue atendida')
     })
   } catch (e) {
-    return { error: e instanceof Error ? e.message : 'No se pudo confirmar' }
+    const msg = e instanceof Error ? e.message : ''
+    return {
+      error: [
+        'Liquidación no encontrada',
+        'Esta liquidación ya fue atendida',
+        'Este grupo está cerrado',
+        'Solo quien recibe puede confirmar',
+        'No puedes confirmar tu propio registro',
+        'Elige la cuenta donde recibiste',
+      ].includes(msg)
+        ? msg
+        : 'No se pudo confirmar',
+    }
   }
   revalidateGroups()
   return { ok: true as const }
@@ -285,12 +301,19 @@ export async function cancelSettlement(settlementId: string) {
     return { error: 'Solo quien registró puede cancelar' }
   if (st.status !== 'PENDING')
     return { error: 'Solo se puede cancelar una liquidación pendiente' }
-  await prisma.$transaction(async (db) => {
-    await db.groupSettlement.delete({ where: { id: st.id } })
+  // Borrado atómico con predicado de permiso: solo el registrante cancela su
+  // propia pendiente.
+  const stDeleted = await prisma.$transaction(async (db) => {
+    const deleted = await db.groupSettlement.deleteMany({
+      where: { id: st.id, status: 'PENDING', registeredById: userId },
+    })
+    if (deleted.count === 0) return false
     if (st.transactionId) {
       await db.transaction.deleteMany({ where: { id: st.transactionId } })
     }
+    return true
   })
+  if (!stDeleted) return { error: 'Solo quien registró puede cancelar' }
   revalidateGroups()
   return { ok: true as const }
 }
@@ -311,12 +334,24 @@ export async function rejectSettlement(settlementId: string) {
   if (st.toSeat.userId !== userId || st.registeredById === userId) {
     return { error: 'Solo quien recibe puede rechazar' }
   }
-  await prisma.$transaction(async (db) => {
-    await db.groupSettlement.delete({ where: { id: st.id } })
+  // Borrado atómico con predicado de permiso: solo quien recibe (seat destino)
+  // rechaza una pendiente que no registró él.
+  const stRejected = await prisma.$transaction(async (db) => {
+    const deleted = await db.groupSettlement.deleteMany({
+      where: {
+        id: st.id,
+        status: 'PENDING',
+        registeredById: { not: userId },
+        toSeat: { userId },
+      },
+    })
+    if (deleted.count === 0) return false
     if (st.transactionId) {
       await db.transaction.deleteMany({ where: { id: st.transactionId } })
     }
+    return true
   })
+  if (!stRejected) return { error: 'Solo quien recibe puede rechazar' }
   revalidateGroups()
   return { ok: true as const }
 }
@@ -335,9 +370,17 @@ export type SettlementRow = {
 /** Liquidaciones PENDING del grupo donde participo (para confirmar/cancelar). */
 export async function getGroupSettlementPendings(
   householdId: string,
-  userId: string,
 ): Promise<{ toConfirm: SettlementRow[]; myPending: SettlementRow[] }> {
-  if (!process.env.DATABASE_URL) return { toConfirm: [], myPending: [] }
+  const empty = { toConfirm: [], myPending: [] }
+  const userId = meIdOf(await auth())
+  if (!userId) return empty
+  if (!process.env.DATABASE_URL) return empty
+  // Solo miembros del grupo pueden ver sus pendientes.
+  const member = await prisma.householdMember.findFirst({
+    where: { householdId, userId },
+    select: { id: true },
+  })
+  if (!member) return empty
   const rows = await prisma.groupSettlement.findMany({
     where: { householdId, status: 'PENDING' },
     include: {
@@ -377,6 +420,15 @@ function round2(n: number): number {
 export async function getGroupNets(
   householdId: string,
 ): Promise<Map<string, SeatNet>> {
+  const empty = new Map<string, SeatNet>()
+  const userId = meIdOf(await auth())
+  if (!userId) return empty
+  // Solo miembros: estos netos incluyen montos de todo el grupo.
+  const member = await prisma.householdMember.findFirst({
+    where: { householdId, userId },
+    select: { id: true },
+  })
+  if (!member) return empty
   const [members, txs, settlements] = await Promise.all([
     prisma.householdMember.findMany({
       where: { householdId },
@@ -477,6 +529,13 @@ export async function getGroupNets(
 export async function groupOutstandingCents(
   householdId: string,
 ): Promise<number> {
+  const userId = meIdOf(await auth())
+  if (!userId) return 0
+  const member = await prisma.householdMember.findFirst({
+    where: { householdId, userId },
+    select: { id: true },
+  })
+  if (!member) return 0
   const nets = await getGroupNets(householdId)
   let rest = 0
   for (const row of nets.values()) {

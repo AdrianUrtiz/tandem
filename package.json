@@ -13,6 +13,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:test": "tsx prisma/seed-test.ts",
     "db:seed:test:clean": "tsx prisma/seed-test.ts --clean",
+    "test": "tsx --test lib/rate-limit.test.ts lib/security-basics.test.ts",
     "db:studio": "prisma studio",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
@@ -31,6 +32,7 @@
     "@radix-ui/react-slot": "^1.3.3",
     "@radix-ui/react-switch": "^1.3.7",
     "@radix-ui/react-tabs": "^1.1.21",
+    "@upstash/redis": "^1.39.0",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

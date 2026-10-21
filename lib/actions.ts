@@ -139,8 +139,10 @@ export async function updateAccount(formData: FormData) {
   })
   if (!acc) return { error: 'Cuenta no encontrada' }
 
-  await prisma.account.update({
-    where: { id: v.id },
+  // Escritura atómica con predicado de pertenencia: si la cuenta dejó de ser
+  // mía entre la lectura y la escritura, `count` es 0 y no se toca nada.
+  const written = await prisma.account.updateMany({
+    where: { id: v.id, userId },
     data: {
       name: v.name,
       lastFour: v.lastFour?.trim() ? v.lastFour.trim() : null,
@@ -155,15 +157,17 @@ export async function updateAccount(formData: FormData) {
         : {}),
     },
   })
+  if (written.count === 0) return { error: 'Cuenta no encontrada' }
   if (v.isFavorite === '1') {
     await prisma.account.updateMany({
       where: { userId, id: { not: v.id } },
       data: { isFavorite: false },
     })
-    await prisma.account.update({
-      where: { id: v.id },
+    const fav = await prisma.account.updateMany({
+      where: { id: v.id, userId },
       data: { isFavorite: true },
     })
+    if (fav.count === 0) return { error: 'Cuenta no encontrada' }
   }
 
   revalidatePath('/cuentas')
@@ -185,10 +189,11 @@ export async function deleteAccount(id: string) {
   })
   if (!acc) return { error: 'Cuenta no encontrada' }
 
-  await prisma.account.update({
-    where: { id },
+  const removed = await prisma.account.updateMany({
+    where: { id, userId },
     data: { isActive: false, isFavorite: false },
   })
+  if (removed.count === 0) return { error: 'Cuenta no encontrada' }
 
   revalidatePath('/cuentas')
   return { ok: true }
@@ -209,10 +214,11 @@ export async function setAccountHidden(id: string, hidden: boolean) {
   })
   if (!acc) return { error: 'Cuenta no encontrada' }
 
-  await prisma.account.update({
-    where: { id },
+  const updated = await prisma.account.updateMany({
+    where: { id, userId },
     data: hidden ? { isHidden: true, isFavorite: false } : { isHidden: false },
   })
+  if (updated.count === 0) return { error: 'Cuenta no encontrada' }
 
   revalidatePath('/cuentas')
   revalidatePath('/actividad')
@@ -234,12 +240,17 @@ export async function setFavoriteAccount(id: string) {
   })
   if (!acc) return { error: 'Cuenta no encontrada' }
 
+  // La segunda escritura lleva el mismo predicado: si la cuenta dejó de ser
+  // visible/mía entre ambas, no se marca favorita ajena.
   await prisma.$transaction([
     prisma.account.updateMany({
       where: { userId, isFavorite: true },
       data: { isFavorite: false },
     }),
-    prisma.account.update({ where: { id }, data: { isFavorite: true } }),
+    prisma.account.updateMany({
+      where: { id, userId, isActive: true, isHidden: false },
+      data: { isFavorite: true },
+    }),
   ])
 
   revalidatePath('/cuentas')
@@ -266,7 +277,10 @@ export async function reorderAccounts(ids: string[]) {
 
   await prisma.$transaction(
     clean.map((id, i) =>
-      prisma.account.update({ where: { id }, data: { position: i } }),
+      prisma.account.updateMany({
+        where: { id, userId },
+        data: { position: i },
+      }),
     ),
   )
 
@@ -399,8 +413,8 @@ export async function updateTransaction(formData: FormData) {
     if (!tx.transferToAccountId)
       return { error: 'Este movimiento no tiene destino registrado' }
 
-    await prisma.transaction.update({
-      where: { id: v.id },
+    const transferWritten = await prisma.transaction.updateMany({
+      where: { id: v.id, createdById: userId },
       data: {
         amount: v.amount,
         concept: v.concept,
@@ -409,6 +423,8 @@ export async function updateTransaction(formData: FormData) {
         transferToAccountId: newDestId,
       },
     })
+    if (transferWritten.count === 0)
+      return { error: 'Movimiento no encontrado' }
     await touchPlace(userId, v.place)
 
     revalidatePath('/actividad')
@@ -455,8 +471,13 @@ export async function updateTransaction(formData: FormData) {
         'Hay un pago pendiente en este compartido: cancélalo para cambiarlo',
     }
 
-  await prisma.transaction.update({
-    where: { id: v.id },
+  // Escritura atómica con predicado de permiso (creador o pagador del gasto
+  // grupal): si el permiso cambió entre la lectura y la escritura, no se toca.
+  const txWritten = await prisma.transaction.updateMany({
+    where: {
+      id: v.id,
+      OR: [{ createdById: userId }, { paidBySeat: { userId } }],
+    },
     data: {
       amount: v.amount,
       concept: v.concept,
@@ -467,6 +488,7 @@ export async function updateTransaction(formData: FormData) {
       ...(tx.type === 'EXPENSE' && !groupTx ? { isShared: wantsShare } : {}),
     },
   })
+  if (txWritten.count === 0) return { error: 'Movimiento no encontrado' }
 
   // Sincroniza los reclamos pendientes al nuevo monto.
   for (const p of pendingLinks) {
@@ -615,7 +637,13 @@ export async function deleteTransaction(id: string) {
     return { error: 'Este movimiento es un cargo de suscripción confirmado' }
   }
 
-  await prisma.transaction.delete({ where: { id } })
+  const txDeleted = await prisma.transaction.deleteMany({
+    where: {
+      id,
+      OR: [{ createdById: userId }, { paidBySeat: { userId } }],
+    },
+  })
+  if (txDeleted.count === 0) return { error: 'Movimiento no encontrado' }
   // Espejo personal del pagador: solo existe por este gasto grupal.
   if (tx.payerTransactionId) {
     await prisma.transaction.deleteMany({
@@ -865,6 +893,8 @@ export async function loginAction(formData: FormData) {
   const { signIn } = await import('@/auth')
   const username = String(formData.get('username') ?? '')
   const password = String(formData.get('password') ?? '')
+  // El throttle vive en authorize() (auth.ts): cubre este camino y el POST
+  // directo a /api/auth/callback/credentials. Aquí solo mensaje genérico.
   try {
     // redirect:false → no lanza NEXT_REDIRECT; el fallo viene como excepción.
     const res = await signIn('credentials', {

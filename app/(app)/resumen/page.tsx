@@ -51,8 +51,13 @@ export default async function ResumenPage() {
       },
       include: {
         account: { select: { statementDay: true, dueDay: true } },
-        createdBy: true,
-        shares: { include: { debtor: true, seat: true } },
+        createdBy: { select: { name: true } },
+        shares: {
+          include: {
+            debtor: { select: { name: true } },
+            seat: { select: { displayName: true } },
+          },
+        },
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),

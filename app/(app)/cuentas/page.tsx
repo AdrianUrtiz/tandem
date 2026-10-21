@@ -49,7 +49,7 @@ export default async function CuentasPage({
     // Privacidad: ni siquiera se consultan las cuentas de la pareja.
     prisma.account.findMany({
       where: { isActive: true, userId: meId },
-      include: { user: true },
+      include: { user: { select: { id: true, name: true } } },
       orderBy: [
         { isFavorite: 'desc' },
         { position: 'asc' },
@@ -65,8 +65,16 @@ export default async function CuentasPage({
         shares: { some: { debtorId: meId } },
       },
       include: {
-        account: true,
-        createdBy: true,
+        account: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            dueDay: true,
+            statementDay: true,
+          },
+        },
+        createdBy: { select: { name: true } },
         shares: { where: { debtorId: meId } },
       },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
@@ -85,9 +93,22 @@ export default async function CuentasPage({
         },
       },
       include: {
-        account: true,
-        createdBy: true,
-        shares: { include: { debtor: true, seat: true } },
+        account: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            dueDay: true,
+            statementDay: true,
+          },
+        },
+        createdBy: { select: { name: true } },
+        shares: {
+          include: {
+            debtor: { select: { name: true } },
+            seat: { select: { displayName: true } },
+          },
+        },
       },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
     }),
@@ -133,11 +154,13 @@ export default async function CuentasPage({
       include: {
         share: {
           include: {
-            transaction: { include: { createdBy: true } },
-            debtor: true,
+            transaction: {
+              include: { createdBy: { select: { name: true } } },
+            },
+            debtor: { select: { name: true } },
           },
         },
-        registeredBy: true,
+        registeredBy: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },
     }),
@@ -150,8 +173,14 @@ export default async function CuentasPage({
         share: { debtorId: meId, transaction: { householdId: null } },
       },
       include: {
-        share: { include: { transaction: { include: { createdBy: true } } } },
-        registeredBy: true,
+        share: {
+          include: {
+            transaction: {
+              include: { createdBy: { select: { name: true } } },
+            },
+          },
+        },
+        registeredBy: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },
     }),
@@ -259,10 +288,10 @@ export default async function CuentasPage({
       return { key: k, label: monthLabelEs(new Date(y, mo - 1, 1)), total }
     })
   // Suscripciones (mías + compartidas de mi pareja) y sus pendientes.
-  const subData = await getSubscriptionData(meId)
+  const subData = await getSubscriptionData()
   subs = subData.subs
   dues = subData.dues
-  const groups = await getGroupSummaries(meId)
+  const groups = await getGroupSummaries()
 
   const catalog = await getCatalog(meId)
   // Recordatorio "Pagar tus tarjetas": cierre de MIS créditos con día
