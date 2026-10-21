@@ -278,7 +278,13 @@ export default async function ActividadPage() {
     },
     include: {
       account: {
-        select: { id: true, name: true, type: true, dueDay: true, statementDay: true },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          dueDay: true,
+          statementDay: true,
+        },
       },
       createdBy: { select: { name: true } },
       shares: { where: { debtorId: meId } },

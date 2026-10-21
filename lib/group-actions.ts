@@ -6,7 +6,10 @@ import { z } from 'zod'
 import { payableInstallments } from '@/lib/calculations'
 import { checkCategory } from '@/lib/catalog'
 import { getLineSums } from '@/lib/debt-payments'
-import { getGroupNets, groupOutstandingCents } from '@/lib/group-settlements'
+import {
+  computeGroupNets,
+  computeGroupOutstandingCents,
+} from '@/lib/group-queries'
 import {
   type SettlementRow,
   getGroupSettlementPendings,
@@ -62,7 +65,8 @@ async function getGroupHousehold(
 
 /** Total aún por liquidar en NETO (para cerrar/eliminar). */
 async function groupOutstanding(householdId: string): Promise<number> {
-  return (await groupOutstandingCents(householdId)) / 100
+  // Creador verificado por el llamador; cálculo directo sin revalidar.
+  return (await computeGroupOutstandingCents(householdId)) / 100
 }
 
 function revalidateAll() {
@@ -790,15 +794,46 @@ export async function updateGroupExpense(formData: FormData) {
     date: parseWallInput(v.date),
   }
   if (hasPayments) {
-    await prisma.$transaction(async (db) => {
-      await db.transaction.update({ where: { id: tx.id }, data: header })
-      if (tx.payerTransactionId) {
-        await db.transaction.updateMany({
-          where: { id: tx.payerTransactionId },
+    try {
+      await prisma.$transaction(async (db) => {
+        // Re-verificación dentro de la transacción: permiso y grupo abierto.
+        const fresh = await db.transaction.findUnique({
+          where: { id: tx.id },
+          select: {
+            createdById: true,
+            householdId: true,
+            paidBySeat: { select: { userId: true } },
+            household: { select: { status: true } },
+          },
+        })
+        const freshOk =
+          fresh != null &&
+          fresh.householdId === v.householdId &&
+          fresh.household?.status === 'ACTIVE' &&
+          (fresh.createdById === userId ||
+            (fresh.paidBySeat?.userId ?? null) === userId)
+        if (!freshOk) throw new Error('Gasto no encontrado')
+        const updated = await db.transaction.updateMany({
+          where: {
+            id: tx.id,
+            OR: [{ createdById: userId }, { paidBySeat: { userId } }],
+          },
           data: header,
         })
+        if (updated.count === 0) throw new Error('Gasto no encontrado')
+        if (tx.payerTransactionId) {
+          await db.transaction.updateMany({
+            where: { id: tx.payerTransactionId },
+            data: header,
+          })
+        }
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : ''
+      return {
+        error: msg === 'Gasto no encontrado' ? msg : 'No se pudo actualizar',
       }
-    })
+    }
     revalidateAll()
     return { ok: true as const }
   }
@@ -926,25 +961,45 @@ export async function setGroupExpenseAccount(
   const catError = await checkCategory(userId, tx.category, 'EXPENSE')
   if (catError) return { error: catError }
 
-  await prisma.$transaction(async (db) => {
-    const personal = await db.transaction.create({
-      data: {
-        type: 'EXPENSE',
-        amount: tx.amount,
-        concept: tx.concept,
-        category: tx.category,
-        date: tx.date,
-        accountId: account.id,
-        createdById: userId,
-        installments: tx.installments,
-        isShared: false,
-      },
+  try {
+    await prisma.$transaction(async (db) => {
+      // Reclamo atómico del vínculo: dos llamadas concurrentes ven
+      // payerTransactionId null en lectura, pero el UPDATE toma el bloqueo de
+      // fila y la segunda ve count 0 tras el commit de la primera. Sin esto,
+      // una de las dos Transactions personales quedaría huérfana.
+      const claimed = await db.transaction.updateMany({
+        where: { id: tx.id, payerTransactionId: null },
+        data: { payerTransactionId: tx.payerTransactionId },
+      })
+      if (claimed.count === 0)
+        throw new Error('Este gasto ya tiene cuenta indicada')
+      const personal = await db.transaction.create({
+        data: {
+          type: 'EXPENSE',
+          amount: tx.amount,
+          concept: tx.concept,
+          category: tx.category,
+          date: tx.date,
+          accountId: account.id,
+          createdById: userId,
+          installments: tx.installments,
+          isShared: false,
+        },
+      })
+      await db.transaction.updateMany({
+        where: { id: tx.id, payerTransactionId: null },
+        data: { payerTransactionId: personal.id },
+      })
     })
-    await db.transaction.update({
-      where: { id: tx.id },
-      data: { payerTransactionId: personal.id },
-    })
-  })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : ''
+    return {
+      error:
+        msg === 'Este gasto ya tiene cuenta indicada'
+          ? msg
+          : 'No se pudo vincular la cuenta',
+    }
+  }
   revalidateAll()
   return { ok: true as const }
 }
@@ -1238,7 +1293,8 @@ export async function getGroupDetail(
     }))
 
   // Balance NETO por seat (pagado − consumido ± liquidaciones confirmadas).
-  const nets = await getGroupNets(householdId)
+  // Membresía verificada arriba; cálculo directo sin revalidar.
+  const nets = await computeGroupNets(householdId)
   const settlements = await getGroupSettlementPendings(householdId)
   return {
     ok: true,
@@ -1311,7 +1367,8 @@ export async function getGroupSummaries(): Promise<GroupSummary[]> {
   return Promise.all(
     households.map(async (h) => {
       const mySeat = h.members.find((m) => m.userId === userId)
-      const nets = await getGroupNets(h.id)
+      // Grupos propios verificados arriba; cálculo directo sin revalidar.
+      const nets = await computeGroupNets(h.id)
       const myNet = mySeat ? (nets.get(mySeat.id)?.netCents ?? 0) : 0
       const expenseCount = await prisma.transaction.count({
         where: { householdId: h.id, type: 'EXPENSE' },

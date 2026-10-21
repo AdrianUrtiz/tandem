@@ -205,8 +205,8 @@ export async function acceptPairing(inviteId: string) {
   })
   if (!invite) return { error: 'Solicitud no encontrada' }
   if (invite.expiresAt < new Date()) {
-    await prisma.coupleInvite.update({
-      where: { id: invite.id },
+    await prisma.coupleInvite.updateMany({
+      where: { id: invite.id, status: 'PENDING', toUserId: userId },
       data: { status: 'EXPIRED' },
     })
     return { error: 'La solicitud expiró, pide una nueva' }

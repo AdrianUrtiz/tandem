@@ -301,8 +301,22 @@ export async function confirmSubscriptionCharge(
       })
     })
   } catch (e) {
+    // Doble confirmación concurrente: la unique (subscriptionId, month) deja
+    // pasar solo una; la perdedora recibe este mensaje, no el error de Prisma.
+    if (
+      typeof e === 'object' &&
+      e !== null &&
+      'code' in e &&
+      e.code === 'P2002'
+    ) {
+      return { error: 'Este cargo ya fue confirmado' }
+    }
+    const msg = e instanceof Error ? e.message : ''
     return {
-      error: e instanceof Error ? e.message : 'No se pudo confirmar el cargo',
+      error:
+        msg === 'Vincula una pareja en Ajustes para compartir'
+          ? msg
+          : 'No se pudo confirmar el cargo',
     }
   }
 

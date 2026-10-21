@@ -120,7 +120,7 @@ export async function checkLimit(
   return { ok: true }
 }
 
-/** Limpia cuota y bloqueo tras un éxito (los aciertos no consumen intentos). */
+/** Limpia cuota, bloqueo y escalado tras un éxito. */
 export async function resetLimit(scope: string, key: string): Promise<void> {
   const db = backend()
   if (!db) {
@@ -129,6 +129,7 @@ export async function resetLimit(scope: string, key: string): Promise<void> {
   }
   await db.del(`tandem-rl:${scope}:${key}`)
   await db.del(`tandem-rl:block:${scope}:${key}`)
+  await db.del(`tandem-rl:block:${scope}:${key}:strikes`)
 }
 
 /** Identificador del cliente para componer claves (cabeceras de proxy). */

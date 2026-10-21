@@ -9,6 +9,9 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // Necesaria para el tipo CITEXT de User.username (también la crea la
+  // migración 20261022000002; esto cubre `prisma db push` en BD vacías).
+  extensions = [citext]
 }
 
 enum AccountType {

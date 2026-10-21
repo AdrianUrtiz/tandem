@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { installmentMonths } from '@/lib/calculations'
 import { checkCategory } from '@/lib/catalog'
 import {
+  type TxDb,
   createCreditorIncome,
   getLineSums,
   lineKey,
@@ -51,7 +52,7 @@ type OwningAccount = { id: string; type: string }
  * flujos (él registra o confirma origen).
  */
 async function createDebtorExpense(
-  db: typeof prisma = prisma,
+  db: TxDb = prisma,
   account: OwningAccount,
   opts: { amount: number; concept: string; userId: string },
 ) {
@@ -467,7 +468,7 @@ export async function confirmPaymentSource(formData: FormData) {
         include: {
           transaction: {
             include: {
-              createdBy: true,
+              createdBy: { select: { name: true } },
               household: { select: { status: true } },
             },
           },
@@ -494,19 +495,39 @@ export async function confirmPaymentSource(formData: FormData) {
   const catError = await checkCategory(userId, 'OTRO', 'EXPENSE')
   if (catError) return { error: catError }
 
-  const expenseId = await createDebtorExpense(prisma, account, {
-    amount: fromCents(toCents(p.amount)),
-    concept: `Pago a ${p.share.transaction.createdBy.name} · ${p.share.transaction.concept}`,
-    userId,
-  })
-  await prisma.debtPayment.update({
-    where: { id: p.id },
-    data: {
-      debtorAccountId: v.accountId,
-      debtorTransactionId: expenseId,
-      debtorConfirmedAt: wallNow(),
-    },
-  })
+  try {
+    await prisma.$transaction(async (db) => {
+      // Reclamo atómico: dos confirmaciones simultáneas (doble tap), solo una
+      // ve debtorConfirmedAt null. El UPDATE toma el bloqueo de fila y la
+      // segunda ve count 0 tras el commit de la primera.
+      const claimed = await db.debtPayment.updateMany({
+        where: { id: p.id, status: 'CONFIRMED', debtorConfirmedAt: null },
+        data: { debtorConfirmedAt: wallNow() },
+      })
+      if (claimed.count === 0) throw new Error('El origen ya fue confirmado')
+      const expense = await createDebtorExpense(db, account, {
+        amount: fromCents(toCents(p.amount)),
+        concept: `Pago a ${p.share.transaction.createdBy.name} · ${p.share.transaction.concept}`,
+        userId,
+      })
+      await db.debtPayment.updateMany({
+        where: { id: p.id, debtorConfirmedAt: { not: null } },
+        data: {
+          debtorAccountId: v.accountId,
+          debtorTransactionId: expense,
+        },
+      })
+      return expense
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : ''
+    return {
+      error:
+        msg === 'El origen ya fue confirmado'
+          ? msg
+          : 'No se pudo confirmar el origen',
+    }
+  }
   revalidateDebts()
   return { ok: true }
 }

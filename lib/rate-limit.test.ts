@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { before, test } from 'node:test'
 
 import { checkLimit, resetLimit } from './rate-limit.js'
+
+// Los tests corren contra el backend en memoria: backend() es perezoso y lee
+// las envs en cada invocación, así que basta con limpiarlas antes del primer
+// checkLimit (aunque existan en CI, aquí no se toca Redis).
+before(() => {
+  delete process.env.UPSTASH_REDIS_REST_URL
+  delete process.env.UPSTASH_REDIS_REST_TOKEN
+  delete process.env.KV_REST_API_URL
+  delete process.env.KV_REST_API_TOKEN
+})
 
 const uniq = () => `t${Date.now()}-${Math.random().toString(36).slice(2)}`
 
