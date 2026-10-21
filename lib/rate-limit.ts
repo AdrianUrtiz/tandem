@@ -67,12 +67,16 @@ let redis: Redis | null | undefined
 
 function backend(): Redis | null {
   if (redis === undefined) {
-    const url = process.env.UPSTASH_REDIS_REST_URL
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN
+    // Conexión Upstash manual o vía Vercel Storage (KV_* se inyecta solo al
+    // conectar Upstash al proyecto). Se necesita el token de lectura/escritura.
+    const url =
+      process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL
+    const token =
+      process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN
     redis = url && token ? new Redis({ url, token }) : null
     if (!redis && process.env.NODE_ENV === 'production') {
       console.warn(
-        '[rate-limit] sin Upstash configurado: límite en memoria por instancia',
+        '[rate-limit] sin Redis configurado: límite en memoria por instancia',
       )
     }
   }
