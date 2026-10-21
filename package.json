@@ -13,7 +13,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:test": "tsx prisma/seed-test.ts",
     "db:seed:test:clean": "tsx prisma/seed-test.ts --clean",
-    "test": "tsx --test lib/rate-limit.test.ts lib/security-basics.test.ts",
+    "test": "prisma validate && tsx --test lib/rate-limit.test.ts lib/security-basics.test.ts",
     "db:studio": "prisma studio",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

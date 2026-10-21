@@ -5,6 +5,8 @@
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
+  // Requerida por `extensions = [citext]` en el datasource (Prisma 7.10).
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
