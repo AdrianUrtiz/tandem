@@ -130,9 +130,14 @@ async function main() {
   }
 
   // Usuarios alfa (alta manual; no hay registro público).
-  // NUNCA ejecutar en producción: el `update` reescribiría contraseñas reales.
+  // NUNCA en producción: el `update` reescribiría contraseñas reales.
+  // Doble seguro: Vercel prod bloqueado + flag explícito en local, porque un
+  // .env local apuntando a prod ejecutaría este seed contra datos reales.
   if (process.env.VERCEL_ENV === 'production') {
     throw new Error('db:seed está prohibido en producción')
+  }
+  if (process.env.ALLOW_SEED !== 'true') {
+    throw new Error('db:seed requiere ALLOW_SEED=true explícito')
   }
   const password = await bcrypt.hash('tandem123', 10)
   const seeds = [

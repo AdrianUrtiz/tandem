@@ -45,3 +45,5 @@ next-env.d.ts
 
 .vercel
 .env*
+# Plantilla sin valores: sí se commitea.
+!.env.example
