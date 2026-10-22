@@ -118,6 +118,19 @@ body::-webkit-scrollbar {
   color: #10b981;
 }
 
+/* Deudas vencidas: rojo para diferenciarlas del mes actual (verde/ámbar) */
+.debt-overdue {
+  border-color: rgb(239 68 68 / 0.4);
+  background-color: var(--card);
+  background-image: linear-gradient(
+    rgb(239 68 68 / 0.1),
+    rgb(239 68 68 / 0.1)
+  );
+}
+.debt-overdue-text {
+  color: #ef4444;
+}
+
 /* Drawer inferior: entra deslizando desde abajo */
 @keyframes sheet-up {
   from {

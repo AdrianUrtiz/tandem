@@ -47,12 +47,13 @@ import { syncForce } from '@/lib/offline/useSnapshotSync'
 import {
   type DebtItemInput,
   type PartnerDebt,
+  buildCarriedDebts,
   buildDebts,
 } from '@/lib/partner-debts'
 import { cancelPayment, confirmPaymentSource } from '@/lib/payment-actions'
 import { useStatementFilters } from '@/lib/resumen-filters'
 import type { DueCharge } from '@/lib/subscriptions'
-import { formatMoney, monthKey } from '@/lib/utils'
+import { formatMoney, monthKey, monthLabelEs } from '@/lib/utils'
 
 /** Pago pendiente que mi pareja registró y yo debo confirmar (soy el acreedor). */
 export type ToConfirmItem = {
@@ -221,6 +222,134 @@ export function CuentasClient({
     () => buildDebts(owedItems, partnerMonth, sumsMap),
     [owedItems, partnerMonth, sumsMap],
   )
+  // Arrastre de meses anteriores al visto: lo exigible con dueKey previo
+  // al mes seleccionado que aún tiene saldo. Si es anterior al mes real
+  // actual es vencido (rojo); si aún está vigente (p. ej. octubre visto
+  // desde noviembre) va en sección neutra sin rojo. "YYYY-MM" compara bien.
+  const debtsCarriedAll = useMemo(
+    () => buildCarriedDebts(debtItems, partnerMonth, sumsMap),
+    [debtItems, partnerMonth, sumsMap],
+  )
+  const owedCarriedAll = useMemo(
+    () => buildCarriedDebts(owedItems, partnerMonth, sumsMap),
+    [owedItems, partnerMonth, sumsMap],
+  )
+
+  // Filtro de estado en Compartidos: por defecto solo pendientes de pago.
+  // Las cards agrupan por cuenta+deudor, así que una cuenta con algún pago
+  // pendiente se sigue mostrando; solo se oculta cuando queda en cero.
+  // Filtro de persona: pareja (debtorId != null, incluye lo que le debo),
+  // otras personas (externos sin cuenta, debtorId == null) o todos.
+  const partnerState = useCuentasFilters((s) => s.partnerState)
+  const setPartnerState = useCuentasFilters((s) => s.setPartnerState)
+  const partnerWho = useCuentasFilters((s) => s.partnerWho)
+  const setPartnerWho = useCuentasFilters((s) => s.setPartnerWho)
+  const PARTNER_STATE_OPTS = [
+    { value: 'pending', label: 'Pendientes' },
+    { value: 'all', label: 'Todos' },
+  ]
+  const PARTNER_WHO_OPTS = [
+    { value: 'all', label: 'Todos' },
+    { value: 'partner', label: 'Pareja' },
+    { value: 'external', label: 'Otras personas' },
+  ]
+  const matchesWho = (debtorId: string | null, who = partnerWho) =>
+    who === 'all' ||
+    (who === 'partner' ? debtorId != null : debtorId == null)
+  const debtsByState = useMemo(
+    () =>
+      partnerState === 'all'
+        ? debts
+        : debts.filter((d) => toCents(d.remaining) > 0),
+    [debts, partnerState],
+  )
+  const owedByState = useMemo(
+    () =>
+      partnerState === 'all'
+        ? owed
+        : owed.filter((d) => toCents(d.remaining) > 0),
+    [owed, partnerState],
+  )
+  const debtsVisible = useMemo(
+    () => debtsByState.filter((d) => matchesWho(d.debtorId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [debtsByState, partnerWho],
+  )
+  const owedVisible = useMemo(
+    () => owedByState.filter((d) => matchesWho(d.debtorId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [owedByState, partnerWho],
+  )
+  // Vencido = anterior al mes real actual (no al mes visto): en octubre
+  // aún hay tiempo para pagar octubre aunque se esté viendo noviembre.
+  // Las cards van a rojo si alguna línea es vencida; si no, a la sección
+  // neutra de meses anteriores. El arrastre siempre tiene saldo.
+  const realCurrentMonth = monthKey(new Date())
+  const isCardOverdue = (d: PartnerDebt) =>
+    d.lines.some((l) => l.dueKey < realCurrentMonth)
+  const debtsOverdueVisible = useMemo(
+    () =>
+      debtsCarriedAll.filter(
+        (d) => matchesWho(d.debtorId) && isCardOverdue(d),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [debtsCarriedAll, partnerWho, partnerMonth],
+  )
+  const owedOverdueVisible = useMemo(
+    () =>
+      owedCarriedAll.filter((d) => matchesWho(d.debtorId) && isCardOverdue(d)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [owedCarriedAll, partnerWho, partnerMonth],
+  )
+  // Anteriores aún vigentes (mes real actual <= dueKey < mes visto): solo
+  // existe al ver meses futuros. Mismo estilo del mes, con origen marcado.
+  const debtsPrevVisible = useMemo(
+    () =>
+      debtsCarriedAll.filter(
+        (d) => matchesWho(d.debtorId) && !isCardOverdue(d),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [debtsCarriedAll, partnerWho, partnerMonth],
+  )
+  const owedPrevVisible = useMemo(
+    () =>
+      owedCarriedAll.filter(
+        (d) => matchesWho(d.debtorId) && !isCardOverdue(d),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [owedCarriedAll, partnerWho, partnerMonth],
+  )
+  const oweOverdueTotal = useMemo(
+    () => debtsOverdueVisible.reduce((a, d) => a + d.remaining, 0),
+    [debtsOverdueVisible],
+  )
+  const owedOverdueTotal = useMemo(
+    () => owedOverdueVisible.reduce((a, d) => a + d.remaining, 0),
+    [owedOverdueVisible],
+  )
+  const owePrevTotal = useMemo(
+    () => debtsPrevVisible.reduce((a, d) => a + d.remaining, 0),
+    [debtsPrevVisible],
+  )
+  const owedPrevTotal = useMemo(
+    () => owedPrevVisible.reduce((a, d) => a + d.remaining, 0),
+    [owedPrevVisible],
+  )
+  // Las confirmaciones de pago solo existen con pareja: se ocultan al
+  // filtrar por otras personas.
+  const showPartnerFlows = partnerWho !== 'external'
+  // Grupos: solo ACTIVE por defecto; los CLOSED se ocultan salvo que el
+  // usuario los pida explícito (son eventos de días que ya se cerraron).
+  const [showClosedGroups, setShowClosedGroups] = useState(false)
+  const activeGroups = useMemo(
+    () => groups.filter((g) => g.status !== 'CLOSED'),
+    [groups],
+  )
+  const closedGroups = useMemo(
+    () => groups.filter((g) => g.status === 'CLOSED'),
+    [groups],
+  )
+  const groupsVisible = showClosedGroups ? groups : activeGroups
   // Recordatorio de pago a la pareja: abre Compartidos en el mes exigible.
   const openPartnerPay = (it: { dueKey: string }) => {
     setPartnerMonth(it.dueKey)
@@ -256,13 +385,13 @@ export function CuentasClient({
       0,
     )
   const oweTotal = useMemo(
-    () => debts.reduce((a, d) => a + d.remaining, 0),
-    [debts],
+    () => debtsVisible.reduce((a, d) => a + d.remaining, 0),
+    [debtsVisible],
   )
 
   const owedTotal = useMemo(
-    () => owed.reduce((a, d) => a + d.remaining, 0),
-    [owed],
+    () => owedVisible.reduce((a, d) => a + d.remaining, 0),
+    [owedVisible],
   )
 
   const monthly = useMemo(
@@ -287,7 +416,9 @@ export function CuentasClient({
   const accType = useCuentasFilters((s) => s.accType)
   const setAccType = useCuentasFilters((s) => s.setAccType)
   const [accSheet, setAccSheet] = useState<null | 'sort' | 'type'>(null)
-  const [partnerSheet, setPartnerSheet] = useState<null | 'month'>(null)
+  const [partnerSheet, setPartnerSheet] = useState<
+    null | 'month' | 'state' | 'who'
+  >(null)
 
   // Monto representativo: saldo en débito, disponible en crédito.
   const effValue = (a: AccountRow) =>
@@ -467,15 +598,31 @@ export function CuentasClient({
           )}
         </TabsContent>
         <TabsContent value="compartidos" className="space-y-4">
-          <div className="flex items-center justify-center">
+          <div className="no-scrollbar -mx-5 flex items-center justify-center gap-2 overflow-x-auto px-5 pb-1">
             <button
               onClick={() => setPartnerSheet('month')}
-              className="rounded-full bg-(--muted) px-4 py-1.5 text-xs font-semibold capitalize">
+              className="shrink-0 rounded-full bg-(--muted) px-4 py-2 text-xs font-semibold capitalize">
               {partnerLabel} ▾
             </button>
+            <FilterPill
+              label={
+                PARTNER_STATE_OPTS.find((o) => o.value === partnerState)!.label
+              }
+              active={partnerState === 'pending'}
+              onClick={() => setPartnerSheet('state')}
+            />
+            <FilterPill
+              label={
+                PARTNER_WHO_OPTS.find((o) => o.value === partnerWho)!.label
+              }
+              active={partnerWho !== 'all'}
+              onClick={() => setPartnerSheet('who')}
+            />
           </div>
           {debts.length === 0 &&
             owed.length === 0 &&
+            debtsCarriedAll.length === 0 &&
+            owedCarriedAll.length === 0 &&
             toConfirm.length === 0 &&
             myPending.length === 0 &&
             toConfirmSource.length === 0 &&
@@ -484,7 +631,30 @@ export function CuentasClient({
             ) : (
               <Empty text="Sin pendientes con tu pareja. Tus grupos están abajo. 🎉" />
             ))}
-          {toConfirmSource.length > 0 && (
+          {debtsVisible.length === 0 &&
+            owedVisible.length === 0 &&
+            debtsOverdueVisible.length === 0 &&
+            owedOverdueVisible.length === 0 &&
+            debtsPrevVisible.length === 0 &&
+            owedPrevVisible.length === 0 &&
+            (debts.length > 0 ||
+              owed.length > 0 ||
+              debtsCarriedAll.length > 0 ||
+              owedCarriedAll.length > 0) &&
+            (showPartnerFlows
+              ? toConfirm.length === 0 &&
+                myPending.length === 0 &&
+                toConfirmSource.length === 0
+              : true) && (
+              <Empty
+                text={
+                  partnerWho !== 'all'
+                    ? 'Sin resultados para ese filtro.'
+                    : 'Sin pendientes este mes. 🎉'
+                }
+              />
+            )}
+          {showPartnerFlows && toConfirmSource.length > 0 && (
             <section className="space-y-2">
               <p className="text-xs font-semibold text-(--muted-foreground)">
                 Confirma de qué cuenta salió ·{' '}
@@ -499,7 +669,7 @@ export function CuentasClient({
               ))}
             </section>
           )}
-          {toConfirm.length > 0 && (
+          {showPartnerFlows && toConfirm.length > 0 && (
             <section className="space-y-2">
               <p className="text-xs font-semibold text-(--muted-foreground)">
                 Por confirmar ·{' '}
@@ -514,7 +684,7 @@ export function CuentasClient({
               ))}
             </section>
           )}
-          {myPending.length > 0 && (
+          {showPartnerFlows && myPending.length > 0 && (
             <section className="space-y-2">
               <p className="text-xs font-semibold text-(--muted-foreground)">
                 En espera de confirmación
@@ -524,7 +694,103 @@ export function CuentasClient({
               ))}
             </section>
           )}
-          {debts.length > 0 && (
+          {debtsOverdueVisible.length > 0 && (
+            <section className="space-y-2">
+              <p className="text-xs font-semibold text-red-500">
+                Vencidos · le debes · {formatMoney(oweOverdueTotal)}
+              </p>
+              <p className="-mt-1 text-[11px] text-(--muted-foreground)">
+                De meses pasados ›
+              </p>
+              {debtsOverdueVisible.map((d) => (
+                <DebtSwipeRow
+                  key={`overdue:${debtKey(d)}`}
+                  d={d}
+                  meId={meId}
+                  overdue
+                  nowMonth={realCurrentMonth}
+                  open={openRow === `overdue:${debtKey(d)}`}
+                  onOpenChange={(o) =>
+                    setOpenRow(o ? `overdue:${debtKey(d)}` : null)
+                  }
+                  onPay={(mode) => setPaySheet({ d, mode })}
+                />
+              ))}
+            </section>
+          )}
+          {owedOverdueVisible.length > 0 && (
+            <section className="space-y-2">
+              <p className="text-xs font-semibold text-red-500">
+                Vencidos · te deben · {formatMoney(owedOverdueTotal)}
+              </p>
+              <p className="-mt-1 text-[11px] text-(--muted-foreground)">
+                De meses pasados ›
+              </p>
+              {owedOverdueVisible.map((d) => (
+                <DebtSwipeRow
+                  key={`overdue:${debtKey(d)}`}
+                  d={d}
+                  meId={meId}
+                  overdue
+                  nowMonth={realCurrentMonth}
+                  open={openRow === `overdue:${debtKey(d)}`}
+                  onOpenChange={(o) =>
+                    setOpenRow(o ? `overdue:${debtKey(d)}` : null)
+                  }
+                  onPay={(mode) => setPaySheet({ d, mode })}
+                />
+              ))}
+            </section>
+          )}
+          {debtsPrevVisible.length > 0 && (
+            <section className="space-y-2">
+              <p className="text-xs font-semibold text-(--muted-foreground)">
+                Pendientes anteriores · le debes · {formatMoney(owePrevTotal)}
+              </p>
+              <p className="-mt-1 text-[11px] text-(--muted-foreground)">
+                De meses anteriores · aún con tiempo ›
+              </p>
+              {debtsPrevVisible.map((d) => (
+                <DebtSwipeRow
+                  key={`prev:${debtKey(d)}`}
+                  d={d}
+                  meId={meId}
+                  carried
+                  nowMonth={realCurrentMonth}
+                  open={openRow === `prev:${debtKey(d)}`}
+                  onOpenChange={(o) =>
+                    setOpenRow(o ? `prev:${debtKey(d)}` : null)
+                  }
+                  onPay={(mode) => setPaySheet({ d, mode })}
+                />
+              ))}
+            </section>
+          )}
+          {owedPrevVisible.length > 0 && (
+            <section className="space-y-2">
+              <p className="text-xs font-semibold text-(--muted-foreground)">
+                Pendientes anteriores · te deben · {formatMoney(owedPrevTotal)}
+              </p>
+              <p className="-mt-1 text-[11px] text-(--muted-foreground)">
+                De meses anteriores · aún con tiempo ›
+              </p>
+              {owedPrevVisible.map((d) => (
+                <DebtSwipeRow
+                  key={`prev:${debtKey(d)}`}
+                  d={d}
+                  meId={meId}
+                  carried
+                  nowMonth={realCurrentMonth}
+                  open={openRow === `prev:${debtKey(d)}`}
+                  onOpenChange={(o) =>
+                    setOpenRow(o ? `prev:${debtKey(d)}` : null)
+                  }
+                  onPay={(mode) => setPaySheet({ d, mode })}
+                />
+              ))}
+            </section>
+          )}
+          {debtsVisible.length > 0 && (
             <section className="space-y-2">
               <p className="text-xs font-semibold text-(--muted-foreground)">
                 Le debes · {formatMoney(oweTotal)}
@@ -532,7 +798,7 @@ export function CuentasClient({
               <p className="-mt-1 text-[11px] text-(--muted-foreground)">
                 Desliza a la derecha para registrar tu pago ›
               </p>
-              {debts.map((d) => (
+              {debtsVisible.map((d) => (
                 <DebtSwipeRow
                   key={debtKey(d)}
                   d={d}
@@ -544,7 +810,7 @@ export function CuentasClient({
               ))}
             </section>
           )}
-          {owed.length > 0 && (
+          {owedVisible.length > 0 && (
             <section className="space-y-2">
               <p className="text-xs font-semibold text-(--muted-foreground)">
                 Te deben · {formatMoney(owedTotal)}
@@ -552,7 +818,7 @@ export function CuentasClient({
               <p className="-mt-1 text-[11px] text-(--muted-foreground)">
                 Desliza a la derecha para registrar el cobro ›
               </p>
-              {owed.map((d) => (
+              {owedVisible.map((d) => (
                 <DebtSwipeRow
                   key={debtKey(d)}
                   d={d}
@@ -564,16 +830,44 @@ export function CuentasClient({
               ))}
             </section>
           )}
-          {groups.length > 0 && (
+          {groupsVisible.length > 0 && (
             <section className="space-y-2">
               <p className="text-xs font-semibold text-(--muted-foreground)">
-                Grupos · {groups.length}
+                Grupos · {groupsVisible.length}
+                {closedGroups.length > 0 && !showClosedGroups
+                  ? ` · ${closedGroups.length} cerrado${closedGroups.length === 1 ? '' : 's'} oculto${closedGroups.length === 1 ? '' : 's'}`
+                  : ''}
               </p>
-              {groups.map((g) => (
+              {groupsVisible.map((g) => (
                 <GroupCard key={g.id} g={g} />
               ))}
+              {closedGroups.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowClosedGroups((v) => !v)}
+                  className="w-full rounded-full border border-(--border) bg-(--card) px-4 py-2 text-xs font-semibold text-(--muted-foreground) transition">
+                  {showClosedGroups
+                    ? 'Ocultar cerrados'
+                    : `Mostrar cerrados (${closedGroups.length})`}
+                </button>
+              )}
             </section>
           )}
+          {groupsVisible.length === 0 &&
+            closedGroups.length > 0 &&
+            !showClosedGroups && (
+              <section className="space-y-2">
+                <p className="text-xs font-semibold text-(--muted-foreground)">
+                  Grupos · 0 activos
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowClosedGroups(true)}
+                  className="w-full rounded-full border border-(--border) bg-(--card) px-4 py-2 text-xs font-semibold text-(--muted-foreground) transition">
+                  {`Mostrar cerrados (${closedGroups.length})`}
+                </button>
+              </section>
+            )}
         </TabsContent>
         <TabsContent value="subs" className="space-y-2">
           <SubscriptionTab
@@ -712,21 +1006,80 @@ export function CuentasClient({
         onOpenChange={(o) => !o && setPartnerSheet(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Seleccionar mes</DialogTitle>
+            <DialogTitle>
+              {partnerSheet === 'state'
+                ? 'Filtrar compartidos'
+                : partnerSheet === 'who'
+                  ? '¿Con quién?'
+                  : 'Seleccionar mes'}
+            </DialogTitle>
           </DialogHeader>
-          <FilterOptions
-            items={partnerMonths.map((m) => ({
-              value: m.key,
-              label: m.label,
-              total: m.total,
-              cap: true,
-            }))}
-            value={partnerMonth}
-            onPick={(v) => {
-              setPartnerMonth(v)
-              setPartnerSheet(null)
-            }}
-          />
+          {partnerSheet === 'state' ? (
+            <FilterOptions
+              items={PARTNER_STATE_OPTS.map((o) => ({
+                ...o,
+                meta:
+                  o.value === 'pending'
+                    ? `${debtsVisible.length + owedVisible.length + debtsOverdueVisible.length + owedOverdueVisible.length + debtsPrevVisible.length + owedPrevVisible.length} · con saldo`
+                    : `${debts.length + owed.length + debtsCarriedAll.length + owedCarriedAll.length} · todos`,
+              }))}
+              value={partnerState}
+              onPick={(v) => {
+                setPartnerState(v)
+                setPartnerSheet(null)
+              }}
+            />
+          ) : partnerSheet === 'who' ? (
+            <FilterOptions
+              items={PARTNER_WHO_OPTS.map((o) => {
+                const monthN =
+                  o.value === 'partner'
+                    ? debtsByState.length +
+                      owedByState.filter((d) => d.debtorId != null).length
+                    : o.value === 'external'
+                      ? owedByState.filter((d) => d.debtorId == null).length
+                      : debtsByState.length + owedByState.length
+                const overdueN =
+                  o.value === 'partner'
+                    ? debtsCarriedAll.filter((d) => d.debtorId != null).length +
+                      owedCarriedAll.filter((d) => d.debtorId != null).length
+                    : o.value === 'external'
+                      ? owedCarriedAll.filter((d) => d.debtorId == null).length
+                      : debtsCarriedAll.length + owedCarriedAll.length
+                const n = monthN + overdueN
+                const whoLabel =
+                  o.value === 'partner'
+                    ? 'pareja'
+                    : o.value === 'external'
+                      ? n === 1
+                        ? 'persona'
+                        : 'personas'
+                      : n === 1
+                        ? 'registro'
+                        : 'registros'
+                return { ...o, meta: `${n} · ${whoLabel}` }
+              })}
+              value={partnerWho}
+              onPick={(v) => {
+                setPartnerWho(v)
+                setPartnerSheet(null)
+              }}
+            />
+          ) : (
+            <FilterOptions
+              items={partnerMonths.map((m) => ({
+                value: m.key,
+                label: m.label,
+                total: m.total,
+                cap: true,
+              }))}
+              value={partnerMonth}
+              onPick={(v) => {
+                setPartnerMonth(v)
+                setPartnerSheet(null)
+              }}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -738,8 +1091,22 @@ function debtKey(d: PartnerDebt) {
   return `${d.accountId}:${d.debtorId ?? `ext:${d.debtorName.trim().toLowerCase()}`}`
 }
 
-function DebtCard({ d, meId }: { d: PartnerDebt; meId: string }) {
+function DebtCard({
+  d,
+  meId,
+  tone = 'month',
+  nowMonth,
+}: {
+  d: PartnerDebt
+  meId: string
+  tone?: 'month' | 'overdue' | 'carried'
+  /** "YYYY-MM" real actual: la línea es vencida si su dueKey es anterior. */
+  nowMonth?: string
+}) {
   const owe = d.debtorId === meId
+  const overdue = tone === 'overdue'
+  const carried = tone === 'carried'
+  const past = overdue || carried
   // Fecha real de pago: periodo de corte de la tarjeta; débito o sin
   // datos → día límite de la tarjeta o fin de mes.
   const due =
@@ -747,12 +1114,33 @@ function DebtCard({ d, meId }: { d: PartnerDebt; meId: string }) {
     (d.accountType === 'CREDIT' && d.dueDay
       ? `para el día ${d.dueDay}`
       : 'antes de fin de mes')
+  const dueKeys = [...new Set(d.lines.map((l) => l.dueKey))].sort()
+  const monthLabelOf = (key: string) => {
+    const [y, mo] = key.split('-').map(Number)
+    if (!y || !mo) return null
+    return monthLabelEs(new Date(y, mo - 1, 1))
+  }
+  const firstLabel = dueKeys.length > 0 ? monthLabelOf(dueKeys[0]) : null
+  const multi = dueKeys.length > 1
+  const originLabel = past
+    ? overdue
+      ? firstLabel
+        ? multi
+          ? `vencidos desde ${firstLabel}`
+          : `vencido de ${firstLabel}`
+        : 'vencido'
+      : firstLabel
+        ? multi
+          ? `desde ${firstLabel}`
+          : `de ${firstLabel}`
+        : null
+    : null
   return (
     <div
-      className={`space-y-1 rounded-3xl border p-4 ${owe ? 'debt-owe' : 'debt-owed'}`}>
+      className={`space-y-1 rounded-3xl border p-4 ${overdue ? 'debt-overdue' : owe ? 'debt-owe' : 'debt-owed'}`}>
       <p className="flex items-center gap-1.5 text-sm text-(--muted-foreground)">
         <HandCoins
-          className={`size-4 ${owe ? 'debt-owe-text' : 'debt-owed-text'}`}
+          className={`size-4 ${overdue ? 'debt-overdue-text' : owe ? 'debt-owe-text' : 'debt-owed-text'}`}
         />{' '}
         {owe ? (
           <>
@@ -763,17 +1151,30 @@ function DebtCard({ d, meId }: { d: PartnerDebt; meId: string }) {
             <b className="text-(--foreground)">{d.debtorName}</b> te debe
           </>
         )}
+        {overdue && (
+          <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-bold text-red-500 uppercase">
+            Vencido
+          </span>
+        )}
       </p>
       <p className="text-2xl font-extrabold tracking-tight">
         {formatMoney(d.remaining)}
       </p>
       <p className="text-xs font-medium text-(--muted-foreground)">
-        a {d.accountName} · {due}
+        a {d.accountName} · {past && originLabel ? originLabel : due}
       </p>
       <ul className="mt-2 space-y-1.5 border-t border-(--border) pt-2 text-xs text-(--muted-foreground)">
         {d.lines.map((l, i) => {
           const rest = Math.max(0, l.monthly - l.paid)
           const settled = l.shareId != null && toCents(rest) <= 0
+          const lineOverdue =
+            past && nowMonth ? l.dueKey < nowMonth : overdue
+          const lineLabel = past ? monthLabelOf(l.dueKey) : null
+          // Solo se marca la línea si aporta info: cards multi-mes o
+          // líneas que difieren del tono de la card (p. ej. octubre vigente
+          // dentro de una card roja por septiembre).
+          const showLineLabel =
+            past && lineLabel && (multi || lineOverdue !== overdue)
           return (
             <li key={i}>
               <span className="flex items-center justify-between gap-2">
@@ -791,6 +1192,17 @@ function DebtCard({ d, meId }: { d: PartnerDebt; meId: string }) {
                   {formatMoney(l.monthly)}/mes
                 </span>
               </span>
+              {showLineLabel &&
+                (lineOverdue ? (
+                  <span className="mt-0.5 flex items-center gap-1 font-semibold text-red-500">
+                    <span className="size-1.5 rounded-full bg-red-500" />
+                    Vencido · {lineLabel}
+                  </span>
+                ) : (
+                  <span className="mt-0.5 block font-medium">
+                    De {lineLabel} · aún con tiempo
+                  </span>
+                ))}
               {l.shareId != null && isPendingId(l.shareId) && (
                 <span className="mt-0.5 flex items-center gap-1 font-semibold text-amber-500">
                   <span className="size-1.5 rounded-full bg-amber-500" />
@@ -826,12 +1238,18 @@ function DebtSwipeRow({
   open,
   onOpenChange,
   onPay,
+  overdue = false,
+  carried = false,
+  nowMonth,
 }: {
   d: PartnerDebt
   meId: string
   open: boolean
   onOpenChange: (o: boolean) => void
   onPay: (mode: 'receive' | 'pay') => void
+  overdue?: boolean
+  carried?: boolean
+  nowMonth?: string
 }) {
   const owe = d.debtorId === meId // yo debo → "Le pagué"; me deben → "Me pagó"
   const settled =
@@ -839,7 +1257,8 @@ function DebtSwipeRow({
     d.lines.every(
       (l) => l.shareId == null || toCents(l.monthly) - toCents(l.paid) <= 0,
     )
-  const card = <DebtCard d={d} meId={meId} />
+  const tone = overdue ? 'overdue' : carried ? 'carried' : 'month'
+  const card = <DebtCard d={d} meId={meId} tone={tone} nowMonth={nowMonth} />
   if (!d.lines.some((l) => l.shareId)) return card // demo: sin pagos
   return (
     <SwipeRow

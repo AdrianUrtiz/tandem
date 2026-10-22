@@ -11,6 +11,8 @@ export type DebtLine = {
   month: string // "YYYY-MM" de la parcialidad: clave de registro del abono
   paid: number // suma CONFIRMED
   pending: number // suma PENDING
+  /** Mes exigible (vencimiento en crédito con corte, compra en el resto). */
+  dueKey: string
 }
 
 /** Deuda entre pareja este mes, agrupada por cuenta. Si debtorId soy yo, la debo;
@@ -106,6 +108,71 @@ export function buildDebts(
         month: p.payKey,
         paid: s.confirmed,
         pending: s.pending,
+        dueKey: p.dueKey,
+      })
+      byAcc.set(gk, g)
+    }
+  }
+  return [...byAcc.values()].sort((a, b) => b.remaining - a.remaining)
+}
+
+/**
+ * Arrastre de meses pasados: lo exigible con `dueKey` anterior al mes
+ * seleccionado que aún tiene restante por pagar. Se agrupa igual que
+ * `buildDebts` (por cuenta+deudor). Si una línea es vencida o no se decide
+ * en el cliente contra el mes real actual: `dueKey < mesReal` es vencido;
+ * lo anterior al mes visto pero aún vigente (p. ej. octubre visto desde
+ * noviembre) se muestra sin rojo. Comparación lexicográfica "YYYY-MM".
+ */
+export function buildCarriedDebts(
+  items: DebtItemInput[],
+  key: string,
+  sums: Map<string, LineSums>,
+): PartnerDebt[] {
+  const byAcc = new Map<string, PartnerDebt>()
+  for (const it of items) {
+    const date = new Date(it.date)
+    const parts = payableInstallments(
+      date,
+      it.installments,
+      it.statementDay,
+      it.dueDay,
+    )
+    for (const p of parts) {
+      if (p.dueKey >= key) continue // solo meses pasados
+      const s = sums.get(`${it.shareId}:${p.payKey}`) ?? {
+        confirmed: 0,
+        pending: 0,
+      }
+      const rest = Math.max(0, toCents(it.monthly) - toCents(s.confirmed))
+      if (rest <= 0) continue // liquidado: no arrastra
+      const gk = `${it.accountId}:${it.debtorId ?? `ext:${it.debtorName.trim().toLowerCase()}`}`
+      const g = byAcc.get(gk) ?? {
+        accountId: it.accountId,
+        accountName: it.accountName,
+        accountType: it.accountType,
+        dueDay: it.dueDay,
+        debtorId: it.debtorId,
+        debtorName: it.debtorName,
+        creditorName: it.creditorName,
+        total: 0,
+        remaining: 0,
+        dueLabel: null,
+        lines: [],
+      }
+      g.total = fromCents(toCents(g.total) + toCents(it.monthly))
+      g.remaining = fromCents(toCents(g.remaining) + rest)
+      if (g.dueLabel == null && p.dueDate) g.dueLabel = dueLabelFor(p.dueDate)
+      g.lines.push({
+        concept: it.concept,
+        monthly: it.monthly,
+        installment: p.index + 1,
+        installments: it.installments,
+        shareId: it.shareId || null,
+        month: p.payKey,
+        paid: s.confirmed,
+        pending: s.pending,
+        dueKey: p.dueKey,
       })
       byAcc.set(gk, g)
     }
