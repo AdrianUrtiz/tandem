@@ -115,22 +115,26 @@ function shortDate(ymd: string) {
   const [y, m, d] = ymd.split('-').map(Number)
   return fmtDayMonth(utc(y, (m || 1) - 1, d || 1))
 }
-/** Hora local HH:MM:SS.mmm de un Date (para combinar con el día elegido). */
-function timeOfDay(d: Date) {
+/** Hora-muro HH:MM:SS.mmm de un Date guardado (getters UTC, ver lib/walltime.ts). */
+function timeOfWall(d: Date) {
   const p = (n: number, l = 2) => String(n).padStart(l, '0')
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`
+  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}.${p(d.getUTCMilliseconds(), 3)}`
 }
 /**
- * Día elegido + hora real. Al crear: hora actual (cada movimiento del día
- * queda con timestamp único y ordena bien). Al editar: se conserva la hora
- * original (solo cambia el día si el usuario lo movió).
+ * Día elegido + hora-muro real. Al crear: hora-muro actual de México. Al
+ * editar: se conserva la hora original (solo cambia el día si el usuario lo
+ * movió). Si el día no cambió, se devuelve el timestamp original intacto para
+ * no tocar la hora por re-construcción ni por zona horaria del dispositivo.
  */
 function buildDateTime(ymd: string, entryDate?: string) {
   if (entryDate) {
     const t = new Date(entryDate)
-    if (!Number.isNaN(t.getTime())) return `${ymd}T${timeOfDay(t)}`
+    if (!Number.isNaN(t.getTime())) {
+      if (ymdOfWall(t) === ymd) return entryDate
+      return `${ymd}T${timeOfWall(t)}`
+    }
   }
-  return `${ymd}T${timeOfDay(new Date())}`
+  return `${ymd}T${timeOfWall(wallNow())}`
 }
 function fmtAmount(s: string) {
   const [i, dec] = s.split('.')
