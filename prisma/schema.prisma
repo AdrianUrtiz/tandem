@@ -3,14 +3,14 @@
 // Despliegue: `npx prisma migrate deploy` en Vercel Build.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider        = "prisma-client"
+  output          = "../generated/prisma"
   // Requerida por `extensions = [citext]` en el datasource (Prisma 7.10).
   previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
   // Necesaria para el tipo CITEXT de User.username (también la crea la
   // migración 20261022000002; esto cubre `prisma db push` en BD vacías).
   extensions = [citext]
@@ -31,20 +31,20 @@ enum TransactionType {
 // códigos del catálogo o `custom:{emoji}:{NOMBRE}`.
 
 model User {
-  id        String   @id @default(cuid())
+  id             String   @id @default(cuid())
   // CITEXT: la unicidad y comparación son case-insensitive a nivel DB
   // (el login ya normaliza a minúsculas en la app).
-  username  String   @unique @db.Citext
-  password  String // hash bcrypt (Auth.js Credentials)
-  name      String
-  avatar    String?
+  username       String   @unique @db.Citext
+  password       String // hash bcrypt (Auth.js Credentials)
+  name           String
+  avatar         String?
   // Se incrementa al cambiar la contraseña: invalida los JWT emitidos antes
   // (el callback `jwt` de Auth.js compara `token.sv` con este valor).
-  sessionVersion Int     @default(0)
+  sessionVersion Int      @default(0)
   // Código personal de vínculo Q-XXXXXX (Ajustes > Pareja). Se genera al primer uso.
-  pairCode  String?  @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  pairCode       String?  @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   accounts              Account[]
   transactions          Transaction[]        @relation("CreatedBy")
@@ -427,6 +427,10 @@ model Household {
   code         String?           @unique
   kind         HouseholdKind
   status       HouseholdStatus   @default(ACTIVE)
+  /**
+   * Cuándo se cerró (null = nunca cerrado o reabierto). La reapertura solo vale dentro de la gracia.
+   */
+  closedAt     DateTime?
   name         String?
   createdById  String
   createdBy    User              @relation("HouseholdCreator", fields: [createdById], references: [id], onDelete: Cascade)

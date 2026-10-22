@@ -9,6 +9,7 @@ import { getLineSums } from '@/lib/debt-payments'
 import {
   computeGroupNets,
   computeGroupOutstandingCents,
+  groupReopenable,
 } from '@/lib/group-queries'
 import {
   type SettlementRow,
@@ -33,6 +34,8 @@ type GroupHousehold = {
   code: string | null
   status: 'ACTIVE' | 'CLOSED'
   createdById: string
+  closedAt: Date | null
+  updatedAt: Date
 }
 
 /** Household GROUP existente o mensaje de error. */
@@ -48,6 +51,8 @@ async function getGroupHousehold(
       kind: true,
       status: true,
       createdById: true,
+      closedAt: true,
+      updatedAt: true,
     },
   })
   if (!household || household.kind !== 'GROUP')
@@ -59,6 +64,8 @@ async function getGroupHousehold(
       code: household.code,
       status: household.status,
       createdById: household.createdById,
+      closedAt: household.closedAt,
+      updatedAt: household.updatedAt,
     },
   }
 }
@@ -1010,6 +1017,10 @@ export type GroupDetail = {
   code: string | null
   /** CLOSED = liquidado: no acepta movimientos ni integrantes. */
   status: 'ACTIVE' | 'CLOSED'
+  /** ISO de cuándo se cerró (null si nunca o reabierto). */
+  closedAt: string | null
+  /** ¿Aún dentro de la gracia de 5 días para reabrir? */
+  reopenable: boolean
   isCreator: boolean
   isMember: boolean
   members: {
@@ -1302,6 +1313,10 @@ export async function getGroupDetail(
     name: h.name ?? 'Grupo',
     code: h.code,
     status: h.status,
+    closedAt: h.closedAt?.toISOString() ?? null,
+    reopenable:
+      h.status !== 'CLOSED' ||
+      groupReopenable({ closedAt: h.closedAt, updatedAt: h.updatedAt }),
     isCreator: h.createdById === userId,
     isMember,
     members: h.members.map((m) => {
@@ -1330,6 +1345,8 @@ export type GroupSummary = {
   code: string | null
   name: string
   status: 'ACTIVE' | 'CLOSED'
+  /** ISO de cuándo se cerró (null si nunca o reabierto). */
+  closedAt: string | null
   isCreator: boolean
   memberCount: number
   memberNames: string[]
@@ -1378,6 +1395,7 @@ export async function getGroupSummaries(): Promise<GroupSummary[]> {
         code: h.code,
         name: h.name ?? 'Grupo',
         status: h.status,
+        closedAt: h.closedAt?.toISOString() ?? null,
         isCreator: h.createdById === userId,
         memberCount: h.members.length,
         memberNames: h.members.map((m) => m.displayName),
@@ -1410,14 +1428,14 @@ export async function closeGroup(householdId: string) {
 
   const closed = await prisma.household.updateMany({
     where: { id: householdId, createdById: userId },
-    data: { status: 'CLOSED' },
+    data: { status: 'CLOSED', closedAt: new Date() },
   })
   if (closed.count === 0) return { error: 'Solo el creador cierra el grupo' }
   revalidateAll()
   return { ok: true as const }
 }
 
-/** Reabrir un grupo cerrado (solo el creador). */
+/** Reabrir un grupo cerrado (solo el creador, dentro de los 5 días del cierre). */
 export async function reopenGroup(householdId: string) {
   const userId = meIdOf(await auth())
   if (!userId) return { error: 'No autenticado' }
@@ -1428,10 +1446,12 @@ export async function reopenGroup(householdId: string) {
   if (group.household.createdById !== userId)
     return { error: 'Solo el creador reabre el grupo' }
   if (group.household.status === 'ACTIVE') return { ok: true as const }
+  if (!groupReopenable(group.household))
+    return { error: 'Este grupo ya no se puede reabrir (más de 5 días cerrado)' }
 
   const reopened = await prisma.household.updateMany({
     where: { id: householdId, createdById: userId },
-    data: { status: 'ACTIVE' },
+    data: { status: 'ACTIVE', closedAt: null },
   })
   if (reopened.count === 0) return { error: 'Solo el creador reabre el grupo' }
   revalidateAll()

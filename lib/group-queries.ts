@@ -11,6 +11,28 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
+/** Gracia para reabrir un grupo cerrado: 5 días desde el cierre. */
+export const GROUP_REOPEN_GRACE_MS = 5 * 24 * 60 * 60 * 1000
+
+/**
+ * Instante de cierre efectivo: `closedAt` explícito; en grupos cerrados
+ * antes de registrarlo se usa `updatedAt` (congelado al cerrar).
+ */
+export function groupClosedTime(h: {
+  closedAt: Date | null
+  updatedAt: Date
+}): Date {
+  return h.closedAt ?? h.updatedAt
+}
+
+/** ¿Aún está dentro de la gracia de reapertura? */
+export function groupReopenable(
+  h: { closedAt: Date | null; updatedAt: Date },
+  now: Date = new Date(),
+): boolean {
+  return now.getTime() - groupClosedTime(h).getTime() <= GROUP_REOPEN_GRACE_MS
+}
+
 /**
  * Neteo por seat: lo pagado menos lo consumido, ajustado por liquidaciones
  * CONFIRMED. Todo en centavos enteros para que la suma dé cero exacto.

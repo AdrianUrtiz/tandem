@@ -158,6 +158,7 @@ export function CuentasShell(server: Props) {
           groups: local.groups.map((g) => ({
             ...g,
             status: g.status ?? ('ACTIVE' as const),
+            closedAt: g.closedAt ?? null,
           })),
         }
       })()

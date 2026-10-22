@@ -76,9 +76,18 @@ const MEMBER_COLORS = [
   '#06b6d4',
 ]
 
+/** Días restantes de la gracia de 5 días para reabrir (cerrado hace <5 días). */
+function reopenHint(closedAt: string): string {
+  const days = Math.floor(
+    (Date.now() - new Date(closedAt).getTime()) / (24 * 60 * 60 * 1000),
+  )
+  const left = 5 - days
+  if (left <= 0) return 'Vence hoy'
+  return left === 1 ? 'Te queda 1 día para reabrirlo' : `Te quedan ${left} días para reabrirlo`
+}
+
 /** Detalle del grupo (online): miembros, gastos, pagos y + gasto grupal. */
-export function GroupDetailClient({
-  detail,
+export function GroupDetailClient({  detail,
   accountOptions,
   cats,
 }: {
@@ -368,13 +377,6 @@ export function GroupDetailClient({
           <MoreVertical className="size-4" />
         </button>
       </div>
-
-      {isClosed && (
-        <p className="rounded-3xl border border-dashed border-(--border) p-4 text-center text-sm text-(--muted-foreground)">
-          Grupo cerrado: todos a mano. Ya no se pueden agregar movimientos
-          {detail.isCreator && ' (puedes reabrirlo desde el menú)'}.
-        </p>
-      )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList>
@@ -737,21 +739,30 @@ export function GroupDetailClient({
               )}
               {detail.isCreator &&
                 (isClosed ? (
-                  <button
-                    type="button"
-                    disabled={menuBusy}
-                    onClick={() =>
-                      runMenuAction(
-                        () => reopenGroup(detail.id),
-                        'Grupo reabierto',
-                      )
-                    }
-                    className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition hover:bg-(--muted) disabled:opacity-50">
-                    <LockOpen className="size-5 text-(--muted-foreground)" />
-                    <span className="flex-1 text-sm font-semibold">
-                      Reabrir grupo
-                    </span>
-                  </button>
+                  detail.reopenable && (
+                    <button
+                      type="button"
+                      disabled={menuBusy}
+                      onClick={() =>
+                        runMenuAction(
+                          () => reopenGroup(detail.id),
+                          'Grupo reabierto',
+                        )
+                      }
+                      className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition hover:bg-(--muted) disabled:opacity-50">
+                      <LockOpen className="size-5 text-(--muted-foreground)" />
+                      <span className="flex-1">
+                        <span className="block text-sm font-semibold">
+                          Reabrir grupo
+                        </span>
+                        {detail.closedAt && (
+                          <span className="block text-xs text-(--muted-foreground)">
+                            {reopenHint(detail.closedAt)}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  )
                 ) : (
                   <button
                     type="button"
