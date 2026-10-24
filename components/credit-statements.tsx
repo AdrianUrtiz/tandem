@@ -1,29 +1,84 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState } from 'react';
 
-import { Check, CreditCard } from 'lucide-react'
-import { useRouter } from 'next/navigation'
 
-import type { AccountRow } from '@/components/account-card'
-import { AccountIcon } from '@/components/account-icon'
-import { AccountMoneySheet } from '@/components/account-money-sheet'
-import { BottomSheet } from '@/components/bottom-sheet'
-import type { AccountOpt } from '@/components/transaction-form'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 
-import { toCents } from '@/lib/money'
-import { useStatementFilters } from '@/lib/resumen-filters'
-import { formatMoney } from '@/lib/utils'
-import { cn } from '@/lib/utils'
-import { fmtMonthShort } from '@/lib/walltime'
+import { Check, ChevronRight, CreditCard } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+
+
+
+import type { AccountRow } from '@/components/account-card';
+import { AccountIcon } from '@/components/account-icon';
+import { AccountMoneySheet } from '@/components/account-money-sheet';
+import { BottomSheet } from '@/components/bottom-sheet';
+import type { AccountOpt } from '@/components/transaction-form';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+
+
+
+import { toCents } from '@/lib/money';
+import { useStatementFilters } from '@/lib/resumen-filters';
+import { formatMoney } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { fmtMonthShort, startOfWallDay, wallNow } from '@/lib/walltime';
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 export type StatementMoveView = {
   id: string
@@ -349,47 +404,157 @@ export function CreditStatements({
 
         <Dialog open={sheet !== null} onOpenChange={(o) => !o && close()}>
           <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                {sheet === 'card' && 'Seleccionar tarjeta'}
-                {sheet === 'period' && 'Seleccionar periodo'}
-              </DialogTitle>
-            </DialogHeader>
-
             {sheet === 'card' && (
-              <Options
-                items={statements.map((s) => ({
-                  value: s.card.id,
-                  label: cardLabel(s.card),
-                  total: s.card.currentDebt,
-                  color: s.card.color,
-                }))}
-                value={view.card.id}
-                onPick={(v) => {
-                  setCardId(v)
-                  close()
-                }}
-              />
+              <>
+                <DialogHeader>
+                  <DialogTitle>Seleccionar tarjeta</DialogTitle>
+                </DialogHeader>
+                <Options
+                  items={statements.map((s) => ({
+                    value: s.card.id,
+                    label: cardLabel(s.card),
+                    total: s.card.currentDebt,
+                    color: s.card.color,
+                  }))}
+                  value={view.card.id}
+                  onPick={(v) => {
+                    setCardId(v)
+                    close()
+                  }}
+                />
+              </>
             )}
             {sheet === 'period' && (
-              <Options
-                items={view.periods.map((p) => ({
-                  value: p.key,
-                  label: p.label,
-                  total: p.charges,
-                  cap: true,
-                }))}
-                value={period.key}
-                onPick={(v) => {
-                  setPeriod(view.card.id, v)
-                  close()
-                }}
-              />
+              <>
+                <DialogHeader>
+                  <DialogTitle className="text-center">
+                    Tus estados de cuenta
+                  </DialogTitle>
+                </DialogHeader>
+                <PeriodSelector
+                  periods={view.periods}
+                  currentKey={view.currentKey}
+                  value={period.key}
+                  onPick={(v) => {
+                    setPeriod(view.card.id, v)
+                    close()
+                  }}
+                />
+              </>
             )}
           </DialogContent>
         </Dialog>
       </CardContent>
     </Card>
+  )
+}
+
+function shortPeriodLabel(p: StatementPeriodView, nowYear: number) {
+  const y = Number(p.key.split('-')[0])
+  if (y === nowYear) return p.label.split(' de ')[0]
+  return p.label
+}
+
+function PeriodSelector({
+  periods,
+  currentKey,
+  value,
+  onPick,
+}: {
+  periods: StatementPeriodView[]
+  currentKey: string
+  value: string
+  onPick: (v: string) => void
+}) {
+  const now = useMemo(() => wallNow(), [])
+  const nowMs = now.getTime()
+  const todayStart = startOfWallDay(now).getTime()
+  const nowYear = now.getUTCFullYear()
+
+  const { futures, pasts, liveKey } = useMemo(() => {
+    const fut = periods
+      .filter((p) => new Date(p.end).getTime() >= todayStart)
+      .sort((a, b) => new Date(a.end).getTime() - new Date(b.end).getTime())
+    const past = periods
+      .filter((p) => new Date(p.end).getTime() < todayStart)
+      .sort((a, b) => new Date(b.end).getTime() - new Date(a.end).getTime())
+    const live =
+      periods.find((p) => {
+        const s = new Date(p.start).getTime()
+        const e = new Date(p.end).getTime()
+        return s <= nowMs && nowMs <= e
+      })?.key ?? currentKey
+    return { futures: fut, pasts: past, liveKey: live }
+  }, [periods, todayStart, nowMs, currentKey])
+
+  const [tab, setTab] = useState<'upcoming' | 'past'>(() =>
+    pasts.some((p) => p.key === value) ? 'past' : 'upcoming',
+  )
+  const list = tab === 'upcoming' ? futures : pasts
+
+  return (
+    <div className="flex min-h-0 flex-col">
+      <div className="grid grid-cols-2 gap-2 pb-2">
+        <button
+          type="button"
+          onClick={() => setTab('past')}
+          className={
+            tab === 'past'
+              ? 'rounded-full bg-(--primary) px-4 py-2.5 text-[15px] font-bold text-white'
+              : 'rounded-full px-4 py-2.5 text-[15px] font-bold text-(--foreground)'
+          }>
+          Meses anteriores
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('upcoming')}
+          className={
+            tab === 'upcoming'
+              ? 'rounded-full bg-(--primary) px-4 py-2.5 text-[15px] font-bold text-white'
+              : 'rounded-full px-4 py-2.5 text-[15px] font-bold text-(--foreground)'
+          }>
+          Próximos meses
+        </button>
+      </div>
+
+      <div className="max-h-[50dvh] min-h-0 flex-1 overflow-y-auto">
+        {list.map((p) => {
+          const sub =
+            p.key === liveKey
+              ? 'Gastos actuales'
+              : tab === 'upcoming'
+                ? 'Estado de cuenta futuro'
+                : 'Estado de cuenta cerrado'
+          return (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => onPick(p.key)}
+              className="flex w-full items-center justify-between gap-3 border-b border-(--border)/60 px-2 py-3.5 text-left transition last:border-b-0 hover:bg-(--muted)/40">
+              <span className="min-w-0">
+                <span className="block truncate text-[17px] font-bold capitalize">
+                  {shortPeriodLabel(p, nowYear)}
+                </span>
+                <span className="block truncate text-sm text-(--muted-foreground)">
+                  {sub}
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-0.5 text-[17px] font-medium">
+                {formatMoney(p.charges)}
+                <ChevronRight className="size-5 text-(--muted-foreground)" />
+              </span>
+            </button>
+          )
+        })}
+        {list.length === 0 && (
+          <p className="px-5 py-8 text-center text-sm text-(--muted-foreground)">
+            {tab === 'upcoming'
+              ? 'Sin próximos estados de cuenta.'
+              : 'Sin estados de cuenta anteriores.'}
+          </p>
+        )}
+      </div>
+    </div>
   )
 }
 
