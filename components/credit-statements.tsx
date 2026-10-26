@@ -500,8 +500,8 @@ function PeriodSelector({
           onClick={() => setTab('past')}
           className={
             tab === 'past'
-              ? 'rounded-full bg-(--primary) px-4 py-2.5 text-[15px] font-bold text-white'
-              : 'rounded-full px-4 py-2.5 text-[15px] font-bold text-(--foreground)'
+              ? 'rounded-full bg-(--primary) px-4 py-2.5 text-xs font-bold text-white'
+              : 'rounded-full px-4 py-2.5 text-xs font-bold text-(--foreground)'
           }>
           Meses anteriores
         </button>
@@ -510,14 +510,14 @@ function PeriodSelector({
           onClick={() => setTab('upcoming')}
           className={
             tab === 'upcoming'
-              ? 'rounded-full bg-(--primary) px-4 py-2.5 text-[15px] font-bold text-white'
-              : 'rounded-full px-4 py-2.5 text-[15px] font-bold text-(--foreground)'
+              ? 'rounded-full bg-(--primary) px-4 py-2.5 text-xs font-bold text-white'
+              : 'rounded-full px-4 py-2.5 text-xs font-bold text-(--foreground)'
           }>
           Próximos meses
         </button>
       </div>
 
-      <div className="max-h-[50dvh] min-h-0 flex-1 overflow-y-auto">
+      <div className="max-h-[70dvh] min-h-0 flex-1 overflow-y-auto">
         {list.map((p) => {
           const sub =
             p.key === liveKey
@@ -532,16 +532,16 @@ function PeriodSelector({
               onClick={() => onPick(p.key)}
               className="flex w-full items-center justify-between gap-3 border-b border-(--border)/60 px-2 py-3.5 text-left transition last:border-b-0 hover:bg-(--muted)/40">
               <span className="min-w-0">
-                <span className="block truncate text-[17px] font-bold capitalize">
+                <span className="block truncate text-sm font-bold capitalize">
                   {shortPeriodLabel(p, nowYear)}
                 </span>
-                <span className="block truncate text-sm text-(--muted-foreground)">
+                <span className="block truncate text-xs text-(--muted-foreground)">
                   {sub}
                 </span>
               </span>
-              <span className="flex shrink-0 items-center gap-0.5 text-[17px] font-medium">
+              <span className="flex shrink-0 items-center gap-0.5 text-sm font-medium">
                 {formatMoney(p.charges)}
-                <ChevronRight className="size-5 text-(--muted-foreground)" />
+                <ChevronRight className="size-4 text-(--muted-foreground)" />
               </span>
             </button>
           )
@@ -570,11 +570,10 @@ function FilterPill({
   return (
     <button
       onClick={onClick}
-      className={`max-w-55 shrink-0 truncate rounded-full border px-4 py-2 text-xs font-semibold transition ${
-        active
-          ? 'border-transparent bg-(--foreground) text-(--background)'
-          : 'border-(--border) bg-(--card) text-(--muted-foreground)'
-      }`}>
+      className={`max-w-55 shrink-0 truncate rounded-full border px-4 py-2 text-xs font-semibold transition ${active
+        ? 'border-transparent bg-(--foreground) text-(--background)'
+        : 'border-(--border) bg-(--card) text-(--muted-foreground)'
+        }`}>
       {label}
     </button>
   )
@@ -601,9 +600,8 @@ function Options({
         <li key={it.value}>
           <button
             onClick={() => onPick(it.value)}
-            className={`flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-left transition hover:bg-(--muted) ${
-              it.value === value ? 'bg-(--muted)' : ''
-            }`}>
+            className={`flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-left transition hover:bg-(--muted) ${it.value === value ? 'bg-(--muted)' : ''
+              }`}>
             {it.color && <AccountIcon type="CREDIT" color={it.color} />}
             <span
               className={`flex-1 text-sm font-semibold ${it.cap ? 'capitalize' : ''}`}>

@@ -54,9 +54,9 @@ export function AccountCard({ a }: { a: AccountRow }) {
           {credit ? 'Crédito' : 'Débito'}
         </p>
         {credit && a.statementDay && a.dueDay && (
-          <div className="mt-1 flex gap-1">
-            <Badge variant="secondary">Corte {a.statementDay}</Badge>
-            <Badge variant="secondary">Pago {a.dueDay}</Badge>
+          <div className="mt-0.5 flex gap-1">
+            <Badge variant="secondary" className="text-xs px-1">Corte {a.statementDay}</Badge>
+            <Badge variant="secondary" className="text-xs px-1.5">Pago {a.dueDay}</Badge>
           </div>
         )}
       </div>
