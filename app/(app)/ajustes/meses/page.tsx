@@ -17,8 +17,9 @@ export default async function MesesPage() {
   if (!meId) redirect('/login')
 
   let msi: Awaited<ReturnType<typeof getMsiConcentrado>>['msi'] = []
-  let msiPayments: Awaited<ReturnType<typeof getMsiConcentrado>>['msiPayments'] =
-    {}
+  let msiPayments: Awaited<
+    ReturnType<typeof getMsiConcentrado>
+  >['msiPayments'] = {}
   try {
     const res = await getMsiConcentrado(meId)
     msi = res.msi
@@ -39,9 +40,8 @@ export default async function MesesPage() {
       </div>
       <div className="flex flex-1 flex-col gap-2 px-5 pt-2 pb-4">
         <div>
-          <p className="text-4xl font-extrabold tracking-tight">Pagos a meses</p>
-          <p className="mt-1 text-sm text-(--muted-foreground)">
-            Tus compras a meses, tuyas y compartidas con tu pareja.
+          <p className="text-4xl font-extrabold tracking-tight">
+            Pagos diferidos
           </p>
         </div>
         <MsiConcentrado meId={meId} items={msi} payments={msiPayments} />
