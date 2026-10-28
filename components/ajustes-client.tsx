@@ -105,31 +105,48 @@ export function AjustesClient({
       />
 
       <div className="mt-auto flex flex-col gap-2">
-        {/* Tema de la aplicación */}
-        <section className="w-full space-y-2 rounded-2xl border border-(--border) p-3">
-          <p className="text-xs font-semibold text-(--muted-foreground)">
-            Tema de la aplicación
-          </p>
-          <div className="grid grid-cols-3 gap-2 rounded-full bg-(--muted) p-1">
-            {THEMES.map((t) => {
-              const Icon = t.icon
-              const active = theme === t.value
-              return (
-                <button
-                  key={t.value}
-                  type="button"
-                  onClick={() => setTheme(t.value)}
-                  aria-pressed={active}
-                  className={cn(
-                    'flex items-center justify-center gap-1.5 rounded-full py-2 text-xs font-semibold transition',
-                    active ? 'bg-(--card) shadow' : 'text-(--muted-foreground)',
-                  )}>
-                  <Icon className="size-4" />
-                  {t.label}
-                </button>
-              )
-            })}
-          </div>
+        {/* Tema de la aplicación: fila compacta con selector inline */}
+        <section className="flex items-center gap-3 rounded-2xl border border-(--border) p-3">
+          {(() => {
+            const current = THEMES.find((t) => t.value === theme) ?? THEMES[0]!
+            const CurrentIcon = current.icon
+            return (
+              <>
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--muted)">
+                  <CurrentIcon className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold">Tema</span>
+                  <span className="block truncate text-xs text-(--muted-foreground)">
+                    {current.label}
+                  </span>
+                </span>
+                <div className="flex shrink-0 gap-0.5 rounded-full bg-(--muted) p-1">
+                  {THEMES.map((t) => {
+                    const Icon = t.icon
+                    const active = theme === t.value
+                    return (
+                      <button
+                        key={t.value}
+                        type="button"
+                        onClick={() => setTheme(t.value)}
+                        aria-pressed={active}
+                        title={t.label}
+                        aria-label={t.label}
+                        className={cn(
+                          'flex size-8 items-center justify-center rounded-full transition active:scale-95',
+                          active
+                            ? 'bg-(--card) shadow'
+                            : 'text-(--muted-foreground)',
+                        )}>
+                        <Icon className="size-4" />
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )
+          })()}
         </section>
 
         {/* Sincronización: fila compacta con botón inline */}
@@ -195,7 +212,7 @@ export function AjustesClient({
           <span className="min-w-0 flex-1">
             <span className="block text-sm font-semibold">Pagos a meses</span>
             <span className="block truncate text-xs text-(--muted-foreground)">
-              Tus compras a MSI, tuyas y compartidas
+              LLeva el control de tus compras a meses
             </span>
           </span>
           <ChevronRight className="size-4 shrink-0 text-(--muted-foreground)" />
