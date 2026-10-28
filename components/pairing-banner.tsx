@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 
 /**
  * Banner de solicitudes de vínculo de pareja pendientes.
- * Aparece en Actividad y lleva a Ajustes > Pareja para aceptar/rechazar.
+ * Aparece en Actividad y lleva a Perfil > Pareja para aceptar/rechazar.
  */
 export function PairingBanner({
   items,

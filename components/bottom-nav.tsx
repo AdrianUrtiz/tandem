@@ -1,6 +1,6 @@
 'use client'
 
-import { LayoutList, PieChart, Settings, Wallet } from 'lucide-react'
+import { LayoutList, PieChart, User, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
@@ -10,7 +10,7 @@ const ITEMS = [
   { href: '/actividad', label: 'Actividad', icon: LayoutList },
   { href: '/resumen', label: 'Resumen', icon: PieChart },
   { href: '/cuentas', label: 'Cuentas', icon: Wallet },
-  { href: '/ajustes', label: 'Ajustes', icon: Settings },
+  { href: '/ajustes', label: 'Perfil', icon: User },
 ]
 
 export function BottomNav() {

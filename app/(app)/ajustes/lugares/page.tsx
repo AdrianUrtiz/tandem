@@ -23,7 +23,7 @@ export default async function LugaresPage() {
         <Link
           href="/ajustes"
           className="inline-flex items-center gap-1 text-sm font-semibold text-(--muted-foreground)">
-          <ChevronLeft className="size-4" /> Ajustes
+          <ChevronLeft className="size-4" /> Perfil
         </Link>
       </div>
       <PlaceManager places={places} />

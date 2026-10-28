@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ChevronRight,
+  CreditCard,
   KeyRound,
   LogOut,
   MapPin,
@@ -23,6 +24,7 @@ import { toast } from 'sonner'
 import { BottomSheet } from '@/components/bottom-sheet'
 import { PairingSection } from '@/components/pairing-section'
 import { PasswordForm } from '@/components/password-form'
+import { ProfileSection } from '@/components/profile-section'
 import { type Theme, useTheme } from '@/components/theme-provider'
 
 import type { PairingState } from '@/lib/couple-actions'
@@ -39,9 +41,13 @@ const THEMES: { value: Theme; label: string; icon: typeof Sun }[] = [
 
 export function AjustesClient({
   username,
+  displayName,
+  avatar,
   initialPairing,
 }: {
   username?: string
+  displayName?: string
+  avatar?: string | null
   initialPairing?: PairingState | null
 }) {
   const { theme, setTheme } = useTheme()
@@ -86,21 +92,21 @@ export function AjustesClient({
     <div className="flex flex-1 flex-col gap-4 px-5 pt-4">
       <div>
         <p className="mb-1 text-sm font-medium text-(--muted-foreground)">
-          Ajustes
+          Perfil
         </p>
-        <p className="truncate text-4xl font-extrabold tracking-tight">
-          Tu cuenta
-        </p>
-        {username && (
-          <p className="mt-1 truncate text-xs font-medium text-(--muted-foreground) uppercase">
-            @{username}
-          </p>
-        )}
       </div>
+
+      {/* Apartado de perfil: avatar + nombre */}
+      <ProfileSection
+        name={displayName ?? 'Mi cuenta'}
+        username={username}
+        avatar={avatar}
+        online={online}
+      />
 
       <div className="mt-auto flex flex-col gap-2">
         {/* Tema de la aplicación */}
-        <section className="w-full space-y-2 rounded-3xl border border-(--border) p-4">
+        <section className="w-full space-y-2 rounded-2xl border border-(--border) p-3">
           <p className="text-xs font-semibold text-(--muted-foreground)">
             Tema de la aplicación
           </p>
@@ -126,81 +132,34 @@ export function AjustesClient({
           </div>
         </section>
 
-        {/* Datos sin conexión */}
-        <section className="w-full space-y-2 rounded-3xl border border-(--border) p-4">
-          <p className="text-xs font-semibold text-(--muted-foreground)">
-            Datos sin conexión
-          </p>
-          <div className="flex items-center gap-2 text-sm">
+        {/* Sincronización: fila compacta con botón inline */}
+        <div className="flex items-center gap-3 rounded-2xl border border-(--border) p-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--muted)">
             {online ? (
-              <Wifi className="size-4 text-emerald-500" />
+              <Wifi className="size-5 text-emerald-500" />
             ) : (
-              <WifiOff className="size-4 text-amber-500" />
+              <WifiOff className="size-5 text-amber-500" />
             )}
-            <span className="font-medium">
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold">Sincronización</span>
+            <span className="block truncate text-xs text-(--muted-foreground)">
               {online ? 'En línea' : 'Sin conexión'}
-            </span>
-            <span className="ml-auto text-xs text-(--muted-foreground)">
               {syncMeta?.lastSyncAt
-                ? `Actualizado ${new Date(syncMeta.lastSyncAt).toLocaleString('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
-                : 'Aún no descargados'}
+                ? ` · ${new Date(syncMeta.lastSyncAt).toLocaleString('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+                : ' · aún no descargados'}
             </span>
-          </div>
+          </span>
           <button
             type="button"
             onClick={handleSync}
             disabled={syncing || !online}
-            title={online ? undefined : 'Sin conexión'}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-(--muted) p-3 text-sm font-semibold transition active:scale-[.99] disabled:opacity-50">
-            <RefreshCw className={cn('size-4', syncing && 'animate-spin')} />
-            {syncing ? 'Sincronizando…' : 'Sincronizar ahora'}
+            title={online ? 'Sincronizar ahora' : 'Sin conexión'}
+            aria-label="Sincronizar ahora"
+            className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--muted) transition active:scale-[.99] disabled:opacity-50">
+            <RefreshCw className={cn('size-5', syncing && 'animate-spin')} />
           </button>
-        </section>
-
-        {/* Pareja (requiere conexión) */}
-        <PairingSection initial={initialPairing ?? null} />
-
-        {/* Categorías (requiere conexión) */}
-        <Link
-          href="/ajustes/categorias"
-          aria-disabled={!online}
-          onClick={online ? undefined : (e) => e.preventDefault()}
-          className={cn(
-            'flex items-center gap-3 rounded-3xl border border-(--border) p-4 transition active:scale-[.99]',
-            !online && 'pointer-events-none opacity-50',
-          )}>
-          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-(--muted)">
-            <Shapes className="size-5" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-semibold">Categorías</span>
-            <span className="block truncate text-xs text-(--muted-foreground)">
-              Personaliza tu catálogo
-            </span>
-          </span>
-          <ChevronRight className="size-5 shrink-0 text-(--muted-foreground)" />
-        </Link>
-
-        {/* Lugares (requiere conexión) */}
-        <Link
-          href="/ajustes/lugares"
-          aria-disabled={!online}
-          onClick={online ? undefined : (e) => e.preventDefault()}
-          className={cn(
-            'flex items-center gap-3 rounded-3xl border border-(--border) p-4 transition active:scale-[.99]',
-            !online && 'pointer-events-none opacity-50',
-          )}>
-          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-(--muted)">
-            <MapPin className="size-5" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-semibold">Lugares</span>
-            <span className="block truncate text-xs text-(--muted-foreground)">
-              Gestiona tus lugares de compra
-            </span>
-          </span>
-          <ChevronRight className="size-5 shrink-0 text-(--muted-foreground)" />
-        </Link>
+        </div>
 
         {/* Cambiar contraseña (requiere conexión) */}
         <button
@@ -208,8 +167,8 @@ export function AjustesClient({
           onClick={() => setPwOpen(true)}
           disabled={!online}
           title={online ? undefined : 'Sin conexión'}
-          className="flex w-full items-center gap-3 rounded-3xl border border-(--border) p-4 text-left transition active:scale-[.99] disabled:opacity-50">
-          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-(--muted)">
+          className="flex w-full items-center gap-3 rounded-2xl border border-(--border) p-3 text-left transition active:scale-[.99] disabled:opacity-50">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--muted)">
             <KeyRound className="size-5" />
           </span>
           <span className="min-w-0 flex-1">
@@ -220,8 +179,69 @@ export function AjustesClient({
               Actual, nueva y confirmación
             </span>
           </span>
-          <ChevronRight className="size-5 shrink-0 text-(--muted-foreground)" />
+          <ChevronRight className="size-4 shrink-0 text-(--muted-foreground)" />
         </button>
+
+        {/* Pareja (requiere conexión) */}
+        <PairingSection initial={initialPairing ?? null} />
+
+        {/* Pagos a meses */}
+        <Link
+          href="/ajustes/meses"
+          className="flex items-center gap-3 rounded-2xl border border-(--border) p-3 transition active:scale-[.99]">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--muted)">
+            <CreditCard className="size-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold">Pagos a meses</span>
+            <span className="block truncate text-xs text-(--muted-foreground)">
+              Tus compras a MSI, tuyas y compartidas
+            </span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-(--muted-foreground)" />
+        </Link>
+
+        {/* Categorías (requiere conexión) */}
+        <Link
+          href="/ajustes/categorias"
+          aria-disabled={!online}
+          onClick={online ? undefined : (e) => e.preventDefault()}
+          className={cn(
+            'flex items-center gap-3 rounded-2xl border border-(--border) p-3 transition active:scale-[.99]',
+            !online && 'pointer-events-none opacity-50',
+          )}>
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--muted)">
+            <Shapes className="size-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold">Categorías</span>
+            <span className="block truncate text-xs text-(--muted-foreground)">
+              Personaliza tu catálogo
+            </span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-(--muted-foreground)" />
+        </Link>
+
+        {/* Lugares (requiere conexión) */}
+        <Link
+          href="/ajustes/lugares"
+          aria-disabled={!online}
+          onClick={online ? undefined : (e) => e.preventDefault()}
+          className={cn(
+            'flex items-center gap-3 rounded-2xl border border-(--border) p-3 transition active:scale-[.99]',
+            !online && 'pointer-events-none opacity-50',
+          )}>
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--muted)">
+            <MapPin className="size-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold">Lugares</span>
+            <span className="block truncate text-xs text-(--muted-foreground)">
+              Gestiona tus lugares de compra
+            </span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-(--muted-foreground)" />
+        </Link>
 
         <BottomSheet open={pwOpen} onOpenChange={setPwOpen}>
           <PasswordForm onDone={() => setPwOpen(false)} />
@@ -231,13 +251,9 @@ export function AjustesClient({
         <button
           type="button"
           onClick={handleSignOut}
-          className="flex w-full items-center justify-center gap-2 rounded-3xl border border-red-500/30 p-4 text-sm font-semibold text-red-500 transition active:scale-[.99]">
+          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-red-500/30 p-3 text-sm font-semibold text-red-500 transition active:scale-[.99]">
           <LogOut className="size-4" /> Cerrar sesión
         </button>
-        <p className="text-center text-[11px] text-(--muted-foreground)">
-          Al salir se borra la copia local. Evita usar la app en dispositivos
-          compartidos.
-        </p>
       </div>
     </div>
   )

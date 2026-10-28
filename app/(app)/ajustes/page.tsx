@@ -5,19 +5,23 @@ import { prisma } from '@/lib/prisma'
 
 import { auth } from '@/auth'
 
-export const metadata = { title: 'Ajustes' }
+export const metadata = { title: 'Perfil' }
 
 export default async function AjustesPage() {
   const session = await auth()
   const meId = (session?.user as { id?: string } | undefined)?.id
   let username: string | undefined
+  let displayName = 'Mi cuenta'
+  let avatar: string | null = null
   if (meId) {
     try {
       const me = await prisma.user.findUnique({
         where: { id: meId },
-        select: { username: true },
+        select: { username: true, name: true, avatar: true },
       })
       username = me?.username
+      if (me?.name) displayName = me.name
+      avatar = me?.avatar ?? null
     } catch {
       username = undefined
     }
@@ -38,5 +42,12 @@ export default async function AjustesPage() {
     pairing = null
   }
 
-  return <AjustesClient username={username} initialPairing={pairing} />
+  return (
+    <AjustesClient
+      username={username}
+      displayName={displayName}
+      avatar={avatar}
+      initialPairing={pairing}
+    />
+  )
 }

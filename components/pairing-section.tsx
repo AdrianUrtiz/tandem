@@ -2,9 +2,18 @@
 
 import { useState } from 'react'
 
-import { Check, Copy, HeartHandshake, Link2, Unlink, X } from 'lucide-react'
+import {
+  Check,
+  ChevronRight,
+  Copy,
+  HeartHandshake,
+  Link2,
+  Unlink,
+  X,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
+import { BottomSheet } from '@/components/bottom-sheet'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,12 +29,13 @@ import {
 } from '@/lib/couple-actions'
 import { cn } from '@/lib/utils'
 
-/** Ajustes > Pareja: código propio, vincular con aceptación y desvincular. */
+/** Perfil > Pareja: fila compacta; el detalle vive en un BottomSheet. */
 export function PairingSection({ initial }: { initial: PairingState | null }) {
   const [state, setState] = useState<PairingState | null>(initial)
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [confirmUnlink, setConfirmUnlink] = useState(false)
+  const [open, setOpen] = useState(false)
 
   async function refresh() {
     const res = await getPairingState()
@@ -56,35 +66,84 @@ export function PairingSection({ initial }: { initial: PairingState | null }) {
     }
   }
 
-  if (!state) {
-    return (
-      <section className="w-full rounded-3xl border border-(--border) p-4">
-        <p className="text-xs font-semibold text-(--muted-foreground)">
-          Pareja
-        </p>
-        <p className="mt-1 text-sm text-(--muted-foreground)">
-          Conéctate para ver tu código de vínculo.
-        </p>
-      </section>
-    )
-  }
+  const pendingCount =
+    (state?.received.length ?? 0) + (state?.sent.length ?? 0)
+  const subtitle = !state
+    ? 'Conéctate para ver tu código de vínculo'
+    : state.partner
+      ? `Vinculado con ${state.partner.name}`
+      : state.received.length > 0
+        ? `${state.received.length} ${state.received.length === 1 ? 'solicitud pendiente' : 'solicitudes pendientes'}`
+        : 'Comparte gastos y suscripciones'
 
   return (
-    <section className="w-full space-y-3 rounded-3xl border border-(--border) p-4">
-      <div className="flex items-center gap-3">
-        <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-(--muted)">
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center gap-3 rounded-2xl border border-(--border) p-3 text-left transition active:scale-[.99]">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--muted)">
           <HeartHandshake className="size-5" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold">Pareja</span>
+          <span className="flex items-center gap-1.5 text-sm font-semibold">
+            Pareja
+            {pendingCount > 0 && !state?.partner && (
+              <span className="flex size-5 items-center justify-center rounded-full bg-emerald-500 text-[10px] font-extrabold text-white">
+                {pendingCount}
+              </span>
+            )}
+          </span>
           <span className="block truncate text-xs text-(--muted-foreground)">
-            {state.partner
-              ? `Vinculado con ${state.partner.name}`
-              : 'Comparte gastos y suscripciones'}
+            {subtitle}
           </span>
         </span>
-      </div>
+        <ChevronRight className="size-4 shrink-0 text-(--muted-foreground)" />
+      </button>
 
+      <BottomSheet open={open} onOpenChange={setOpen}>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-6">
+          <p className="text-center text-sm font-bold">Pareja</p>
+          {!state ? (
+            <p className="py-4 text-center text-sm text-(--muted-foreground)">
+              Conéctate para ver tu código de vínculo.
+            </p>
+          ) : (
+            <PairingBody
+              state={state}
+              code={code}
+              setCode={setCode}
+              busy={busy}
+              run={run}
+              confirmUnlink={confirmUnlink}
+              setConfirmUnlink={setConfirmUnlink}
+            />
+          )}
+        </div>
+      </BottomSheet>
+    </>
+  )
+}
+
+function PairingBody({
+  state,
+  code,
+  setCode,
+  busy,
+  run,
+  confirmUnlink,
+  setConfirmUnlink,
+}: {
+  state: PairingState
+  code: string
+  setCode: (v: string) => void
+  busy: boolean
+  run: (fn: () => Promise<{ error?: string }>, okMsg?: string) => Promise<void>
+  confirmUnlink: boolean
+  setConfirmUnlink: (v: boolean) => void
+}) {
+  return (
+    <>
       {/* Mi código: solo sin vínculo (vinculado ya no se necesita). */}
       {!state.partner && (
         <div className="flex items-center gap-2 rounded-2xl bg-(--muted) p-3">
@@ -106,6 +165,9 @@ export function PairingSection({ initial }: { initial: PairingState | null }) {
 
       {state.partner ? (
         <>
+          <p className="text-center text-sm">
+            Vinculado con <b>{state.partner.name}</b>
+          </p>
           {!confirmUnlink ? (
             <Button
               type="button"
@@ -221,12 +283,12 @@ export function PairingSection({ initial }: { initial: PairingState | null }) {
               </Button>
             </div>
             <p className="text-xs text-(--muted-foreground)">
-              Tu pareja lo acepta desde sus Ajustes. Sin aceptación no se
+              Tu pareja lo acepta desde su Perfil. Sin aceptación no se
               comparte nada.
             </p>
           </form>
         </>
       )}
-    </section>
+    </>
   )
 }
