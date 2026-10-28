@@ -19,7 +19,7 @@ import { toCatalog } from '@/lib/offline/derive-activity'
 import { cn } from '@/lib/utils'
 
 const FAB_CLS =
-  'fixed right-5 bottom-24 z-40 flex size-14 items-center justify-center rounded-full bg-(--primary) text-(--primary-foreground) shadow-2xl transition active:scale-95'
+  'fixed right-5 bottom-20 z-40 flex size-14 items-center justify-center rounded-full bg-(--primary) text-(--primary-foreground) shadow-2xl transition active:scale-95'
 
 type FabProps = {
   accountOptions: AccountOpt[]
@@ -82,7 +82,7 @@ function CuentasSpeedDial({ accountOptions, cats, userName }: FabProps) {
           expanded ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
       />
-      <div className="pointer-events-none fixed right-5 bottom-24 z-50 flex flex-col items-end gap-3">
+      <div className="pointer-events-none fixed right-5 bottom-20 z-50 flex flex-col items-end gap-3">
         <div
           aria-hidden={!expanded}
           className={cn(

@@ -868,7 +868,7 @@ export function GroupDetailClient({  detail,
           type="button"
           onClick={() => setExpenseOpen(true)}
           aria-label="Agregar gasto grupal"
-          className="fixed right-5 bottom-24 z-40 flex size-14 items-center justify-center rounded-full bg-(--primary) text-(--primary-foreground) shadow-2xl transition active:scale-95">
+          className="fixed right-5 bottom-20 z-40 flex size-14 items-center justify-center rounded-full bg-(--primary) text-(--primary-foreground) shadow-2xl transition active:scale-95">
           <Plus className="size-7" />
         </button>
       )}

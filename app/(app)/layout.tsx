@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 
 import { BottomNav } from '@/components/bottom-nav'
 import { Fab } from '@/components/fab'
+import { ScrollTopButton } from '@/components/scroll-top-button'
 
 import { getCatalog } from '@/lib/catalog'
 import { prisma } from '@/lib/prisma'
@@ -51,6 +52,7 @@ export default async function AppLayout({
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col">
       <main className="pt-safe flex flex-1 flex-col pb-44">{children}</main>
+      <ScrollTopButton />
       <Fab
         accountOptions={accounts}
         cats={catalog}
