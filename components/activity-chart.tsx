@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef } from 'react'
 
 import { formatMoney } from '@/lib/utils'
 
@@ -10,15 +10,21 @@ export type Bucket = { label: string; total: number }
 export function ActivityChart({
   buckets,
   todayIndex,
+  selected,
+  onSelect,
+  onSwipe,
 }: {
   buckets: Bucket[]
   todayIndex?: number | null
+  selected: number | null
+  onSelect: (i: number | null) => void
+  /** dir 1 = siguiente (swipe a la izquierda), -1 = anterior. */
+  onSwipe?: (dir: 1 | -1) => void
 }) {
-  const [sel, setSel] = useState<number | null>(null)
+  const sel = selected
   const n = buckets.length
   const max = Math.max(0, ...buckets.map((b) => b.total))
   const peakIdx = buckets.findIndex((b) => max > 0 && b.total === max)
-  const selTotal = sel != null ? (buckets[sel]?.total ?? 0) : null
 
   const ticks = useMemo(() => {
     if (n <= 1) return [0]
@@ -30,39 +36,77 @@ export function ActivityChart({
   const gap = n > 120 ? 'gap-0' : n > 31 ? 'gap-px' : 'gap-[3px]'
   const barW = n > 31 ? 'w-full' : 'w-full max-w-3'
 
+  // Swipe horizontal para cambiar de mes/periodo. No usa preventDefault
+  // para no bloquear el scroll vertical; solo dispara si predomina X.
+  const startRef = useRef<{ x: number; y: number } | null>(null)
+  const suppressRef = useRef(false)
+
+  function swipeEnd(x: number, y: number) {
+    const s = startRef.current
+    startRef.current = null
+    if (!s || !onSwipe) return
+    const dx = x - s.x
+    const dy = y - s.y
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+      suppressRef.current = true
+      onSwipe(dx < 0 ? 1 : -1)
+    }
+  }
+
   return (
     <div>
-      <div className="flex h-5 items-center justify-center text-xs font-semibold text-(--muted-foreground)">
+      <div className="flex h-8 items-center justify-center">
         {sel != null && buckets[sel] ? (
-          <span>
-            {buckets[sel].label} ·{' '}
-            <span className="text-(--foreground)">
-              {formatMoney(selTotal ?? 0)}
-            </span>
-            {peakIdx === sel && (
-              <span className="text-(--primary)"> · pico</span>
-            )}
-          </span>
+          <button
+            onClick={() => onSelect(null)}
+            className="rounded-full bg-(--foreground) px-4 py-1.5 text-xs font-semibold text-(--background)">
+            {buckets[sel].label} · {formatMoney(buckets[sel].total)} ✕
+          </button>
         ) : (
-          <span>
+          <span className="text-xs font-semibold text-(--muted-foreground)">
             {peakIdx >= 0 && buckets[peakIdx]
               ? `Pico: ${buckets[peakIdx].label} · ${formatMoney(max)}`
               : 'Sin gastos en el periodo'}
           </span>
         )}
       </div>
-
       <div
-        className={`flex h-28 items-stretch ${gap}`}
+        className={`flex h-28 touch-pan-y items-stretch select-none ${gap}`}
         role="img"
-        aria-label="Gastos por día">
+        aria-label="Gastos por día"
+        onTouchStart={(e) => {
+          const t = e.touches[0]
+          startRef.current = { x: t.clientX, y: t.clientY }
+          suppressRef.current = false
+        }}
+        onTouchMove={(e) => {
+          const s = startRef.current
+          if (!s) return
+          const t = e.touches[0]
+          if (Math.abs(t.clientX - s.x) > 24) suppressRef.current = true
+        }}
+        onTouchEnd={(e) => {
+          const t = e.changedTouches[0]
+          swipeEnd(t.clientX, t.clientY)
+        }}
+        onMouseDown={(e) => {
+          startRef.current = { x: e.clientX, y: e.clientY }
+          suppressRef.current = false
+        }}
+        onMouseUp={(e) => swipeEnd(e.clientX, e.clientY)}>
         {buckets.map((b, i) => {
           const active = sel === i
           const isPeak = peakIdx === i
           return (
             <button
               key={i}
-              onClick={() => setSel((s) => (s === i ? null : i))}
+              onClick={() => {
+                if (suppressRef.current) {
+                  suppressRef.current = false
+                  return
+                }
+                onSelect(sel === i ? null : i)
+              }}
               aria-label={`${b.label}: ${formatMoney(b.total)}`}
               className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1 py-0.5">
               <div
