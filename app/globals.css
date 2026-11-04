@@ -69,6 +69,18 @@ body {
   scrollbar-width: none;
 }
 
+/* Modales (Dialog y BottomSheet, ambos role="dialog"): ocultar scrollbars
+   del contenedor y de sus áreas internas, manteniendo el scroll. */
+[role='dialog'].overflow-y-auto,
+[role='dialog'] .overflow-y-auto {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+[role='dialog'].overflow-y-auto::-webkit-scrollbar,
+[role='dialog'] .overflow-y-auto::-webkit-scrollbar {
+  display: none;
+}
+
 /* App tipo móvil: ocultar scrollbar global manteniendo el scroll.
    Solo visual — el scroll táctil / rueda / teclado sigue funcionando. */
 html,
