@@ -48,7 +48,7 @@ export function lineRemaining(l: PayLine): number {
 /**
  * Sheet para abonos de pareja.
  * - receive: "me pagó" → CONFIRMED + ingreso en mi cuenta (la elijo aquí).
- * - pay: "le pagué" → PENDING + egreso opcional en mi cuenta.
+ * - pay: "le pagué" → PENDING + egreso en mi cuenta (la elijo aquí).
  * - confirm: confirmo lo que registró mi pareja → ingreso en mi cuenta.
  */
 export function PaymentSheet({
@@ -103,7 +103,10 @@ export function PaymentSheet({
           fd.set('shareId', sel.shareId)
           fd.set('month', sel.month)
           fd.set('amount', amount)
-          if (mode === 'receive') fd.set('accountId', accountId)
+          // Tanto "me pagó" como "le pagué" envían la cuenta elegida: en
+          // modo pay crea el egreso del deudor (antes se descartaba y la
+          // salida nunca se reflejaba). Sin cuentas queda como solo-aviso.
+          if (accountId) fd.set('accountId', accountId)
           return registerPayment(fd)
         })())
     setPending(false)
@@ -343,7 +346,8 @@ export function PaymentSheet({
       )}
       {mode === 'pay' && hasOpen && (
         <p className="text-center text-[11px] text-(--muted-foreground)">
-          Tu pareja deberá confirmarlo en su app
+          Se registrará la salida en tu cuenta y tu pareja deberá confirmarlo
+          en su app
         </p>
       )}
     </div>

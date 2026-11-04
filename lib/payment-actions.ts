@@ -449,6 +449,9 @@ const SourceSchema = z.object({
  * El deudor confirma de qué cuenta salió un pago que el acreedor dice haber
  * recibido. Crea su egreso y deja constancia (cuenta + fecha), sin tocar
  * los saldos del acreedor ni el estado CONFIRMED.
+ * También sirve para reparar un "le pagué" registrado sin cuenta (el
+ * selector antes no se enviaba): si el registrante es el propio deudor pero
+ * aún no hay egreso, se permite.
  */
 export async function confirmPaymentSource(formData: FormData) {
   const userId = await meId()
@@ -485,7 +488,10 @@ export async function confirmPaymentSource(formData: FormData) {
   const debtorId = p.share.debtorId ?? p.share.seat?.userId ?? null
   if (debtorId !== userId)
     return { error: 'Solo quien pagó confirma el origen' }
-  if (p.registeredById === userId) return { error: 'Tú registraste este pago' }
+  // Si lo registró el propio deudor y ya hay egreso, nada que confirmar.
+  // Si se registró sin cuenta (bug viejo del selector), se permite reparar.
+  if (p.registeredById === userId && (p.debtorTransactionId ?? p.transactionId))
+    return { error: 'Tú registraste este pago' }
   if (p.debtorConfirmedAt) return { error: 'El origen ya fue confirmado' }
 
   const account = await prisma.account.findFirst({
