@@ -2,16 +2,30 @@
 
 import { useMemo, useState } from 'react'
 
-import { CalendarClock, CreditCard, User, Users } from 'lucide-react'
+import {
+  AlertTriangle,
+  CalendarClock,
+  Check,
+  Clock,
+  CreditCard,
+  User,
+  Users,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
-import { installmentMonths } from '@/lib/calculations'
-import { splitMoney } from '@/lib/money'
+import { payableInstallments } from '@/lib/calculations'
+import { splitMoney, toCents } from '@/lib/money'
 import { formatMoney, monthLabelEs } from '@/lib/utils'
 import { cn } from '@/lib/utils'
-import { mexicoMonthKey } from '@/lib/walltime'
+import {
+  fmtMonthLong,
+  mexicoMonthKey,
+  todayMexicoYMD,
+  wallDay,
+} from '@/lib/walltime'
 
 export type MsiShareView = {
   id: string
@@ -28,6 +42,12 @@ export type MsiItemView = {
   installments: number
   date: string // ISO
   accountName: string
+  accountType: 'DEBIT' | 'CREDIT' | null
+  /** Corte/vencimiento de la tarjeta de compra (null = mes calendario). */
+  statementDay: number | null
+  dueDay: number | null
+  /** Parcialidades liquidadas de mis compras (claves "YYYY-MM"). */
+  settledPayKeys: string[]
   isShared: boolean
   createdById: string
   creatorName: string
@@ -57,6 +77,8 @@ function fmtFull(d: string): string {
 
 type Computed = {
   months: string[]
+  /** Exigibilidad por parcialidad (corte de la tarjeta o mes calendario). */
+  due: { dueKey: string; dueDate: Date | null }[]
   split: number[]
   curKey: string
   /** índice 0-based de la parcialidad actual (clamp). */
@@ -69,16 +91,32 @@ type Computed = {
   progress: number
 }
 
+/** "YYYY-MM-DD" de una hora-muro (para comparar con todayMexicoYMD). */
+function ymdWall(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`
+}
+
 function computeItem(it: MsiItemView, curKey: string): Computed {
   const n = Math.max(1, Math.round(it.installments))
-  const months = installmentMonths(new Date(it.date), n)
+  // Cada parcialidad se vuelve exigible en el mes de su vencimiento
+  // (corte de la tarjeta en crédito con corte; mes calendario en el resto).
+  // `months` (clave de registro de abonos) no cambia.
+  const parts = payableInstallments(
+    new Date(it.date),
+    n,
+    it.statementDay ?? null,
+    it.dueDay ?? null,
+  )
+  const months = parts.map((p) => p.payKey)
+  const due = parts.map((p) => ({ dueKey: p.dueKey, dueDate: p.dueDate }))
   const split = splitMoney(it.amount, n)
-  let elapsed = months.filter((m) => m <= curKey).length
+  let elapsed = due.filter((d) => d.dueKey <= curKey).length
   if (elapsed < 1) elapsed = 1
   if (elapsed > n) elapsed = n
   const curIdx = elapsed - 1
-  const finished = curKey > months[n - 1]!
-  const notStarted = curKey < months[0]!
+  const finished = curKey > due[n - 1]!.dueKey
+  const notStarted = curKey < due[0]!.dueKey
   const monthlyNow = split[curIdx] ?? 0
   const remainingTotal = finished
     ? 0
@@ -88,6 +126,7 @@ function computeItem(it: MsiItemView, curKey: string): Computed {
     : split.slice(0, curIdx).reduce((a, v) => a + v, 0)
   return {
     months,
+    due,
     split,
     curKey,
     curIdx,
@@ -120,6 +159,57 @@ function shareTotals(
   return { total, confirmed, pending, remaining }
 }
 
+/** Estado de pago de una parcialidad compartida (lo que se debe vs abonado). */
+type MonthState =
+  | 'paid'
+  | 'charged'
+  | 'toConfirm'
+  | 'partial'
+  | 'overdue'
+  | 'due'
+  | 'upcoming'
+
+const MONTH_PILL: Record<
+  MonthState,
+  { text: string; cls: string; Icon: LucideIcon | null }
+> = {
+  paid: {
+    text: 'Pagada',
+    cls: 'bg-emerald-500/15 text-emerald-500',
+    Icon: Check,
+  },
+  charged: {
+    text: 'Cargada',
+    cls: 'bg-(--muted) text-(--muted-foreground)',
+    Icon: Check,
+  },
+  toConfirm: {
+    text: 'Por confirmar',
+    cls: 'bg-amber-500/15 text-amber-500',
+    Icon: Clock,
+  },
+  partial: {
+    text: 'Abono parcial',
+    cls: 'bg-amber-500/15 text-amber-500',
+    Icon: Clock,
+  },
+  overdue: {
+    text: 'Vencida · por pagar',
+    cls: 'bg-red-500/15 text-red-500',
+    Icon: AlertTriangle,
+  },
+  due: {
+    text: 'Actual · por pagar',
+    cls: 'bg-amber-500/15 text-amber-500',
+    Icon: Clock,
+  },
+  upcoming: {
+    text: 'Próxima',
+    cls: 'bg-(--muted) text-(--muted-foreground)',
+    Icon: null,
+  },
+}
+
 export function MsiConcentrado({
   meId,
   items,
@@ -131,6 +221,7 @@ export function MsiConcentrado({
 }) {
   const [selId, setSelId] = useState<string | null>(null)
   const curKey = useMemo(() => mexicoMonthKey(), [])
+  const todayKey = useMemo(() => todayMexicoYMD(), [])
   const computed = useMemo(() => {
     const map = new Map<string, Computed>()
     for (const it of items) map.set(it.id, computeItem(it, curKey))
@@ -383,38 +474,147 @@ export function MsiConcentrado({
                 )}
 
                 <div>
-                  <p className="mb-1 text-xs font-semibold text-(--muted-foreground)">
-                    Calendario de parcialidades
-                  </p>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-(--muted-foreground)">
+                      Calendario de parcialidades
+                    </p>
+                    <p className="flex items-center gap-2 text-[10px] font-semibold text-(--muted-foreground)">
+                      <span className="inline-flex items-center gap-0.5">
+                        <Check
+                          className={cn(
+                            'size-3',
+                            sel.isShared
+                              ? 'text-emerald-500'
+                              : 'text-(--muted-foreground)',
+                          )}
+                        />{' '}
+                        {sel.isShared ? 'Pagada' : 'Cargada'}
+                      </span>
+                      <span className="inline-flex items-center gap-0.5">
+                        <Clock className="size-3 text-amber-500" /> Pendiente
+                      </span>
+                      <span className="inline-flex items-center gap-0.5">
+                        Próxima
+                      </span>
+                    </p>
+                  </div>
                   <ul className="divide-y divide-(--border)/60 rounded-2xl border border-(--border)/60">
                     {selComp.months.map((m, i) => {
                       const amt = selComp.split[i] ?? 0
                       const isCur = i === selComp.curIdx && !selComp.finished
+                      const part = selComp.due[i] ?? {
+                        dueKey: m,
+                        dueDate: null,
+                      }
                       const isPast =
-                        selComp.finished || m < selComp.curKey
+                        selComp.finished || part.dueKey < selComp.curKey
+                      // Abonos de la deuda compartida en este mes (suma de shares).
+                      let confirmed = 0
+                      let pending = 0
+                      let expected = 0
+                      if (sel.isShared) {
+                        for (const s of sel.shares) {
+                          expected += s.monthlyAmount
+                          const v = payments[`${s.id}:${m}`]
+                          if (v) {
+                            confirmed += v.c
+                            pending += v.p
+                          }
+                        }
+                      }
+                      const paid =
+                        sel.isShared &&
+                        toCents(expected) > 0 &&
+                        toCents(confirmed) >= toCents(expected)
+                      const hasPending = toCents(pending) > 0
+                      const hasPartial = !paid && toCents(confirmed) > 0
+                      // Mis compras: el periodo liquidado (o el débito ya
+                      // cargado) marca la parcialidad como pagada. Sin corte
+                      // configurado no hay dato: queda como cargada.
+                      const minePaid =
+                        !sel.isShared && sel.settledPayKeys.includes(m)
+                      const hasPayInfo =
+                        !sel.isShared &&
+                        (sel.accountType === 'DEBIT' ||
+                          (sel.accountType === 'CREDIT' &&
+                            sel.statementDay != null))
+                      // Vencida = mes de vencimiento pasado, o ya pasó el día
+                      // límite dentro del mes en curso.
+                      const overdue =
+                        !paid &&
+                        (part.dueKey < selComp.curKey ||
+                          (part.dueDate != null &&
+                            ymdWall(part.dueDate) < todayKey))
+                      let state: MonthState
+                      if (sel.isShared) {
+                        if (paid) state = 'paid'
+                        else if (hasPending) state = 'toConfirm'
+                        else if (hasPartial) state = 'partial'
+                        else if (overdue) state = 'overdue'
+                        else if (isCur) state = 'due'
+                        else state = 'upcoming'
+                      } else if (minePaid) {
+                        state = 'paid'
+                      } else if (!hasPayInfo && isPast) {
+                        state = 'charged'
+                      } else if (overdue) {
+                        state = 'overdue'
+                      } else if (isCur) {
+                        state = 'due'
+                      } else {
+                        state = 'upcoming'
+                      }
+                      const pill = MONTH_PILL[state]
+                      // Fecha límite de la tarjeta (solo si aún no está pagada).
+                      const showDue =
+                        part.dueDate != null &&
+                        (sel.isShared ? !paid : !isPast)
                       return (
                         <li
                           key={m}
                           className={cn(
                             'flex items-center justify-between gap-2 px-3.5 py-2.5 text-sm',
-                            isCur && 'bg-(--primary)/10 font-semibold',
+                            isCur && 'bg-(--primary)/10',
                           )}>
-                          <span>
+                          <span className="min-w-0">
                             <span className="block font-semibold">
                               {i + 1}/{sel.installments} · {monthLabel(m)}
                             </span>
-                            <span className="block text-[11px] text-(--muted-foreground)">
-                              {isCur
-                                ? 'Parcialidad actual'
-                                : isPast
-                                  ? sel.isShared
-                                    ? 'Parcialidad pasada'
-                                    : 'Mensualidad pasada'
-                                  : 'Próxima'}
+                            <span
+                              className={cn(
+                                'mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold',
+                                pill.cls,
+                              )}>
+                              {pill.Icon && <pill.Icon className="size-3" />}
+                              {pill.text}
                             </span>
+                            {showDue && (
+                              <span className="block text-[10px] text-(--muted-foreground)">
+                                {overdue ? 'Venció' : 'Vence'}{' '}
+                                {wallDay(part.dueDate!)} de{' '}
+                                {fmtMonthLong(part.dueDate!)}
+                              </span>
+                            )}
                           </span>
-                          <span className="font-bold">
-                            {formatMoney(amt)}
+                          <span className="shrink-0 text-right">
+                            <span
+                              className={cn(
+                                'block font-bold',
+                                paid && 'text-emerald-500',
+                              )}>
+                              {formatMoney(amt)}
+                            </span>
+                            {(hasPending || hasPartial) && (
+                              <span className="block text-[10px] font-semibold text-amber-500">
+                                {hasPartial && (
+                                  <>abonado {formatMoney(confirmed)}</>
+                                )}
+                                {hasPartial && hasPending && ' · '}
+                                {hasPending && (
+                                  <>por confirmar {formatMoney(pending)}</>
+                                )}
+                              </span>
+                            )}
                           </span>
                         </li>
                       )
@@ -422,8 +622,9 @@ export function MsiConcentrado({
                   </ul>
                   {!sel.isShared && (
                     <p className="mt-1 text-center text-[11px] text-(--muted-foreground)">
-                      El avance es por calendario: se descuenta cada mes que
-                      pasa.
+                      Pagada = el periodo quedó liquidado en tu tarjeta (en
+                      débito, el cargo ya se aplicó). Sin corte configurado
+                      solo se muestra como cargada.
                     </p>
                   )}
                 </div>
