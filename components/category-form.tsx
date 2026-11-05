@@ -77,7 +77,7 @@ export function CategoryForm({
   return (
     <form
       onSubmit={onSubmit}
-      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-6">
+      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       {editing && <input type="hidden" name="id" value={initial!.id} />}
 
       {/* Vista previa */}
@@ -177,7 +177,7 @@ export function CategoryForm({
       )}
       <Button
         type="submit"
-        className="h-12 w-full rounded-2xl text-base"
+        className="h-12 w-full shrink-0 rounded-2xl text-base"
         disabled={pending}>
         {pending
           ? 'Guardando…'
