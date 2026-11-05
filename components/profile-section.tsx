@@ -221,7 +221,7 @@ export function ProfileSection({
       <BottomSheet open={open} onOpenChange={setOpen}>
         <form
           onSubmit={onSubmit}
-          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-6">
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <p className="text-center text-sm font-bold">Editar perfil</p>
 
           {/* Vista previa en vivo */}
@@ -360,7 +360,7 @@ export function ProfileSection({
           )}
           <Button
             type="submit"
-            className="h-12 w-full rounded-2xl text-base"
+            className="h-12 w-full shrink-0 rounded-2xl text-base"
             disabled={pending || draftName.trim().length === 0}>
             {pending ? 'Guardando…' : 'Guardar perfil'}
           </Button>
