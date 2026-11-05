@@ -14,6 +14,7 @@ import {
 } from '@/lib/money'
 import { PLACE_MAX_LEN } from '@/lib/place-format'
 import { touchPlace } from '@/lib/places'
+import { touchCompanions } from '@/lib/companions'
 import { prisma } from '@/lib/prisma'
 import { formatMoney } from '@/lib/utils'
 import { parseWallInput, wallNow } from '@/lib/walltime'
@@ -307,11 +308,85 @@ const UpdateTxSchema = z.object({
   shareAmount: optionalMoneySchema,
   debtorId: z.string().optional(),
   externalName: z.string().trim().min(1).max(40).optional(),
+  // Gasto en grupo (v1): N integrantes como JSON.
+  // [{ debtorId?, externalName?, amount }] — uno de los dos por fila.
+  sharesJson: z.string().optional(),
 })
 
 // Edición solo del creador. Editables: concepto, monto, categoría, fecha,
 // cuenta y —en gastos— el compartido (con quién y su aportación).
 // Tipo y MSI quedan fijos (definen las parcialidades).
+// Gasto en grupo (v1): un integrante aporta una parte del total.
+// Exactamente uno de debtorId / externalName por fila.
+export type MultiShareInput = {
+  debtorId?: string | null
+  externalName?: string | null
+  amount: number
+}
+
+function cleanExternal(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const v = raw.trim().replace(/\s+/g, ' ')
+  if (v.length < 1 || v.length > 40) return null
+  return v
+}
+
+/**
+ * Parsea y valida `sharesJson` para gasto en grupo.
+ * - 1..10 filas, cada una con debtorId XOR externalName y amount > 0.
+ * - Deduplica por identidad: `debtor:<id>` vs `ext:<nombre-lower>`.
+ *   "Michi" pareja + "michi" texto son 2 integrantes válidos.
+ * - Suma de partes <= total (el resto lo absorbo yo).
+ * Devuelve filas limpias o mensaje de error.
+ */
+function parseMultiShares(
+  raw: unknown,
+  total: number,
+): { shares?: MultiShareInput[]; error?: string } {
+  if (raw == null || raw === '') return {}
+  if (typeof raw !== 'string') return { error: 'Reparto inválido' }
+  let arr: unknown
+  try {
+    arr = JSON.parse(raw)
+  } catch {
+    return { error: 'Reparto inválido' }
+  }
+  if (!Array.isArray(arr) || arr.length === 0)
+    return { error: 'Agrega al menos un integrante' }
+  if (arr.length > 10) return { error: 'Máximo 10 integrantes' }
+  const out: MultiShareInput[] = []
+  const seen = new Set<string>()
+  const totalC = toCents(total)
+  let sumC = 0
+  for (const row of arr) {
+    if (typeof row !== 'object' || row == null)
+      return { error: 'Reparto inválido' }
+    const r = row as Record<string, unknown>
+    const debtorId =
+      typeof r.debtorId === 'string' && r.debtorId ? r.debtorId : null
+    const externalName = cleanExternal(r.externalName)
+    const amount = Number(r.amount)
+    if (debtorId && externalName)
+      return { error: 'Elige pareja o nombre, no ambos' }
+    if (!debtorId && !externalName)
+      return { error: 'Falta quién aporta en el reparto' }
+    if (!(amount > 0) || Number.isNaN(amount))
+      return { error: 'Reparto inválido' }
+    const key = debtorId
+      ? `debtor:${debtorId}`
+      : `ext:${(externalName as string).toLowerCase()}`
+    if (seen.has(key)) return { error: 'Hay integrantes duplicados' }
+    seen.add(key)
+    const amtC = toCents(amount)
+    if (amtC <= 0) return { error: 'Reparto inválido' }
+    sumC += amtC
+    out.push({ debtorId, externalName, amount })
+  }
+  if (sumC - totalC > 0)
+    return { error: 'La suma de las partes no puede ser mayor al total' }
+  return { shares: out }
+}
+
 export async function updateTransaction(formData: FormData) {
   const session = await auth()
   const userId = (session?.user as { id?: string } | undefined)?.id
@@ -435,12 +510,18 @@ export async function updateTransaction(formData: FormData) {
 
   // Compartido (solo gastos individuales): resuelve el destino y valida el
   // reparto. Los gastos de grupo (householdId) conservan sus seats.
-  const current = tx.shares[0] ?? null
+  // Gasto en grupo (v1): N shares vía sharesJson; legado: 1 share.
   const groupTx = tx.householdId != null
   const wantsShare = tx.type === 'EXPENSE' && !groupTx && v.isShared
+  const multiParsed =
+    wantsShare && tx.type === 'EXPENSE'
+      ? parseMultiShares(v.sharesJson, v.amount)
+      : {}
+  if (multiParsed.error) return { error: multiParsed.error }
+  const multiShares = multiParsed.shares ?? null
   let shareDebtorId: string | null = null
   let shareExternalName: string | null = null
-  if (wantsShare) {
+  if (wantsShare && !multiShares) {
     if (v.externalName && v.debtorId)
       return { error: 'Elige una opción: tu pareja o un nombre, no ambas' }
     if (v.externalName) {
@@ -457,14 +538,71 @@ export async function updateTransaction(formData: FormData) {
     if (v.shareAmount != null && v.shareAmount > v.amount)
       return { error: 'La aportación no puede ser mayor al total' }
   }
+  if (wantsShare && multiShares) {
+    const { getPartnerId } = await import('@/lib/households')
+    const partnerId = await getPartnerId(userId)
+    for (const s of multiShares) {
+      if (s.debtorId === '__PARTNER__') {
+        if (!partnerId) return { error: 'Vincula una pareja para incluirla' }
+        s.debtorId = partnerId
+      } else if (s.debtorId && s.debtorId !== partnerId) {
+        return { error: 'Solo puedes compartir con tu pareja vinculada' }
+      }
+      if (s.externalName && !cleanExternal(s.externalName))
+        return { error: 'Nombre inválido (1-40 letras)' }
+    }
+    // Sin pareja vinculada, solo externos.
+    if (!partnerId && multiShares.some((s) => s.debtorId))
+      return { error: 'Vincula una pareja para incluirla' }
+  }
+
+  // Pagos vivos sobre los shares de este gasto: con PENDING/CONFIRMED no se
+  // tocan integrantes, reparto ni monto (primero cancélalos).
+  const shareIds = tx.shares.map((s) => s.id)
+  const sharePayments =
+    shareIds.length > 0
+      ? await prisma.debtPayment.findMany({
+          where: {
+            shareId: { in: shareIds },
+            status: { in: ['PENDING', 'CONFIRMED'] },
+          },
+          select: { id: true },
+        })
+      : []
+  const hasSharePayments = sharePayments.length > 0
+  const currentKey =
+    tx.shares.length === 0
+      ? null
+      : tx.shares.length === 1 && !multiShares
+        ? (tx.shares[0].debtorId ?? tx.shares[0].externalName)
+        : `multi:${[...tx.shares]
+            .map((s) => s.debtorId ?? `ext:${(s.externalName ?? '').toLowerCase()}`)
+            .sort()
+            .join('|')}`
+  const nextKey = !wantsShare
+    ? null
+    : multiShares
+      ? `multi:${[...multiShares]
+          .map((s) => s.debtorId ?? `ext:${(s.externalName ?? '').toLowerCase()}`)
+          .sort()
+          .join('|')}`
+      : (shareDebtorId ?? shareExternalName)
+  const changedWho =
+    !groupTx && tx.type === 'EXPENSE' && currentKey !== nextKey
+  // Monto o reparto tocados con pagos vivos: se bloquea.
+  const changedAmounts =
+    !groupTx &&
+    tx.type === 'EXPENSE' &&
+    wantsShare &&
+    (toCents(v.amount) !== toCents(tx.amount) || changedWho)
+  if (hasSharePayments && (changedWho || changedAmounts))
+    return {
+      error:
+        'Hay pagos registrados en este compartido: cancélalos para cambiarlo',
+    }
 
   // Cambiar con quién se comparte (o quitarlo) con un pago pendiente vivo
   // dejaría el reclamo colgado: primero cancélalo.
-  const changedWho =
-    !groupTx &&
-    tx.type === 'EXPENSE' &&
-    (wantsShare ? (shareDebtorId ?? shareExternalName) : null) !==
-      (current ? (current.debtorId ?? current.externalName) : null)
   if (pendingLinks.length > 0 && changedWho)
     return {
       error:
@@ -502,11 +640,32 @@ export async function updateTransaction(formData: FormData) {
   // fijos pactados se recalculan igual al editar (ahora es editable).
   // En gastos grupales el reparto (seats) es fijo, pero si cambia el monto
   // se reescalan las partes proporcionalmente (se conserva cada sharePct).
+  // Gasto en grupo: se reescriben los N shares (sin pagos vivos arriba).
   if (tx.type === 'EXPENSE' && !groupTx) {
     const n = Math.max(1, Math.round(tx.installments))
     if (!wantsShare) {
-      if (current)
-        await prisma.transactionShare.delete({ where: { id: current.id } })
+      if (tx.shares.length > 0) {
+        await prisma.transactionShare.deleteMany({
+          where: { transactionId: tx.id },
+        })
+      }
+    } else if (multiShares) {
+      await prisma.transactionShare.deleteMany({
+        where: { transactionId: tx.id },
+      })
+      for (const s of multiShares) {
+        const amtC = toCents(s.amount)
+        await prisma.transactionShare.create({
+          data: {
+            transactionId: tx.id,
+            debtorId: s.debtorId ?? null,
+            externalName: s.externalName ?? null,
+            sharePct: (amtC / toCents(v.amount)) * 100,
+            monthlyAmount: fromCents(Math.round(amtC / n)),
+            isFixedAmount: true,
+          },
+        })
+      }
     } else {
       const sharePct =
         v.shareAmount != null
@@ -523,12 +682,18 @@ export async function updateTransaction(formData: FormData) {
         monthlyAmount,
         isFixedAmount: v.shareAmount != null,
       }
-      if (current) {
+      const current = tx.shares[0] ?? null
+      if (current && tx.shares.length === 1) {
         await prisma.transactionShare.update({
           where: { id: current.id },
           data,
         })
       } else {
+        if (tx.shares.length > 1) {
+          await prisma.transactionShare.deleteMany({
+            where: { transactionId: tx.id },
+          })
+        }
         await prisma.transactionShare.create({
           data: { transactionId: tx.id, ...data },
         })
@@ -577,6 +742,11 @@ export async function updateTransaction(formData: FormData) {
   revalidatePath('/cuentas')
   revalidatePath('/grupos')
   await touchPlace(userId, v.place)
+  // Amigos del gasto en grupo / compartido externo: sugerencias a futuro.
+  await touchCompanions(userId, [
+    ...(multiShares?.map((s) => s.externalName) ?? []),
+    shareExternalName,
+  ])
   return { ok: true }
 }
 
@@ -680,6 +850,8 @@ const TxSchema = z.object({
   // Compartido con alguien sin cuenta (ej. "Mamá"): solo su nombre.
   // Excluyente con `debtorId`.
   externalName: z.string().trim().min(1).max(40).optional(),
+  // Gasto en grupo (v1): N integrantes como JSON.
+  sharesJson: z.string().optional(),
   // Llave de idempotencia de la cola offline (outbox): `temp-<uuid>`
   // generado en el dispositivo. Solo la manda el drenado offline.
   clientKey: z.string().min(1).max(64).optional(),
@@ -786,9 +958,33 @@ export async function createTransaction(formData: FormData) {
 
   // Determina al deudor: mi pareja vinculada o una persona sin cuenta
   // (externalName). Sin uno de los dos no se puede compartir.
+  // Gasto en grupo (v1): N integrantes vía sharesJson.
   let debtorId: string | null = null
   let externalName: string | null = null
-  if (v.isShared) {
+  let multiShares: MultiShareInput[] | null = null
+  if (v.isShared && v.sharesJson) {
+    const parsed = parseMultiShares(v.sharesJson, v.amount)
+    if (parsed.error) return { error: parsed.error }
+    multiShares = parsed.shares ?? null
+    if (multiShares && multiShares.length > 0) {
+      const { getPartnerId } = await import('@/lib/households')
+      const partnerId = await getPartnerId(userId)
+      for (const s of multiShares) {
+        if (s.debtorId === '__PARTNER__') {
+          if (!partnerId)
+            return { error: 'Vincula una pareja para incluirla' }
+          s.debtorId = partnerId
+        } else if (s.debtorId && s.debtorId !== partnerId) {
+          return { error: 'Solo puedes compartir con tu pareja vinculada' }
+        }
+      }
+      if (!partnerId && multiShares.some((s) => s.debtorId))
+        return { error: 'Vincula una pareja para incluirla' }
+      if (v.type !== 'EXPENSE')
+        return { error: 'Solo los gastos se comparten' }
+    }
+  }
+  if (v.isShared && !multiShares) {
     if (v.externalName && v.debtorId)
       return { error: 'Elige una opción: tu pareja o un nombre, no ambas' }
     if (v.externalName) {
@@ -814,6 +1010,7 @@ export async function createTransaction(formData: FormData) {
   if (
     v.type === 'EXPENSE' &&
     v.isShared &&
+    !multiShares &&
     v.shareAmount &&
     v.shareAmount > v.amount
   ) {
@@ -844,7 +1041,23 @@ export async function createTransaction(formData: FormData) {
         },
       })
 
-      if (v.type === 'EXPENSE' && v.isShared && (debtorId || externalName)) {
+      if (v.type === 'EXPENSE' && v.isShared && multiShares && multiShares.length > 0) {
+        // Gasto en grupo: N partes explícitas (montos ya validados, suman <= total).
+        const n = Math.max(1, Math.round(v.installments))
+        for (const s of multiShares) {
+          const amtC = toCents(s.amount)
+          await db.transactionShare.create({
+            data: {
+              transactionId: tx.id,
+              debtorId: s.debtorId ?? null,
+              externalName: s.externalName ?? null,
+              sharePct: (amtC / toCents(v.amount)) * 100,
+              monthlyAmount: fromCents(Math.round(amtC / n)),
+              isFixedAmount: true,
+            },
+          })
+        }
+      } else if (v.type === 'EXPENSE' && v.isShared && (debtorId || externalName)) {
         // Cantidad fija pactada (ej. $125 de $400) o porcentaje (50/50 por defecto).
         const n = Math.max(1, Math.round(v.installments))
         await db.transactionShare.create({
@@ -881,6 +1094,11 @@ export async function createTransaction(formData: FormData) {
   }
 
   await touchPlace(userId, v.place)
+  // Amigos del gasto en grupo / compartido externo: sugerencias a futuro.
+  await touchCompanions(userId, [
+    ...(multiShares?.map((s) => s.externalName) ?? []),
+    externalName,
+  ])
   revalidatePath('/actividad')
   revalidatePath('/resumen')
   revalidatePath('/cuentas')

@@ -16,11 +16,13 @@ import { getGroupSummaries } from '@/lib/group-actions'
 import { normalizeMoney } from '@/lib/money'
 import type {
   OfflineAccount,
+  OfflineCompanion,
   OfflinePlace,
   OfflineTransaction,
 } from '@/lib/offline/db'
 import { SNAPSHOT_VERSION } from '@/lib/offline/db'
 import type { SnapshotPayload } from '@/lib/offline/snapshot'
+import { getCompanions } from '@/lib/companions'
 import { getPlaces } from '@/lib/places'
 import { prisma } from '@/lib/prisma'
 import { getSubscriptionData } from '@/lib/subscription-actions'
@@ -62,6 +64,7 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
     me,
     partnerId,
     placeRows,
+    companionRows,
   ] = await Promise.all([
     prisma.account.findMany({
       where: { isActive: true, userId },
@@ -83,6 +86,7 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
     }),
     import('@/lib/households').then((m) => m.getPartnerId(userId)),
     getPlaces(userId),
+    getCompanions(userId),
   ])
   const meName = me?.name ?? 'Tú'
   const partnerRow = partnerId
@@ -132,7 +136,12 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
           },
         },
         createdBy: { select: { name: true } },
-        shares: true,
+        shares: {
+          include: {
+            debtor: { select: { name: true } },
+            seat: { select: { displayName: true } },
+          },
+        },
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),
@@ -154,7 +163,12 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
           },
         },
         createdBy: { select: { name: true } },
-        shares: true,
+        shares: {
+          include: {
+            debtor: { select: { name: true } },
+            seat: { select: { displayName: true } },
+          },
+        },
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),
@@ -266,6 +280,21 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
       // Compartido individual (no de grupo) con deudor: datos para editar.
       const share =
         t.householdId == null && t.isShared ? (t.shares[0] ?? null) : null
+      const groupShares =
+        t.householdId == null && t.isShared
+          ? t.shares.map((s) => ({
+              debtorId: s.debtorId,
+              externalName: s.externalName,
+              amount:
+                normalizeMoney(s.monthlyAmount) * Math.max(1, t.installments),
+            }))
+          : []
+      const shareNames =
+        t.householdId == null && t.isShared
+          ? t.shares.map(
+              (s) => s.debtor?.name ?? s.seat?.displayName ?? s.externalName ?? 'Pareja',
+            )
+          : []
       return {
         id: t.id,
         concept: t.concept,
@@ -293,6 +322,8 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
         shareMonthly: share ? normalizeMoney(share.monthlyAmount) : undefined,
         shareFixed: share?.isFixedAmount,
         shareExternalName: share?.externalName ?? null,
+        shares: groupShares.length > 1 ? groupShares : undefined,
+        shareNames: shareNames.length > 1 ? shareNames : undefined,
         partnerShare: false as const,
         statementKey: t.statementKey ?? null,
         updatedAt: t.updatedAt.toISOString(),
@@ -592,6 +623,11 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
       key: p.name.trim().toLowerCase(),
       name: p.name,
       lastUsedAt: p.lastUsedAt,
+    })),
+    companions: companionRows.map((c): OfflineCompanion => ({
+      key: c.name.trim().toLowerCase(),
+      name: c.name,
+      lastUsedAt: c.lastUsedAt,
     })),
     subscriptions: subData.subs.map((s) => ({
       id: s.id,

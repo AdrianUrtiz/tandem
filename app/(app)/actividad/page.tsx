@@ -36,7 +36,7 @@ export default async function ActividadPage() {
       include: {
         account: { select: { name: true, type: true } },
         createdBy: { select: { name: true } },
-        shares: true,
+        shares: { include: { debtor: { select: { name: true } } } },
       },
       // Desempate por creación: varios movimientos pueden compartir fecha+hora
       // (mediodías fijos históricos, cargos de suscripción).
@@ -74,6 +74,21 @@ export default async function ActividadPage() {
     // Compartido individual (no de grupo) con deudor: datos para editar.
     const share =
       t.householdId == null && t.isShared ? (t.shares[0] ?? null) : null
+    // Gasto en grupo (v1): todas las partes + nombres para detalle y prefill.
+    const groupShares =
+      t.householdId == null && t.isShared
+        ? t.shares.map((s) => ({
+            debtorId: s.debtorId,
+            externalName: s.externalName,
+            amount: normalizeMoney(s.monthlyAmount) * Math.max(1, t.installments),
+          }))
+        : []
+    const shareNames =
+      t.householdId == null && t.isShared
+        ? t.shares.map(
+            (s) => s.debtor?.name ?? s.externalName ?? 'Pareja',
+          )
+        : []
     return {
       id: t.id,
       concept: t.concept,
@@ -100,6 +115,8 @@ export default async function ActividadPage() {
       shareMonthly: share ? normalizeMoney(share.monthlyAmount) : undefined,
       shareFixed: share?.isFixedAmount,
       shareExternalName: share?.externalName ?? null,
+      shares: groupShares.length > 1 ? groupShares : undefined,
+      shareNames: shareNames.length > 1 ? shareNames : undefined,
       createdById: t.createdById,
       partnerShare: false,
     }

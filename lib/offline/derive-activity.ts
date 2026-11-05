@@ -48,6 +48,8 @@ export function toTxRows(rows: OfflineTransaction[]): TxRow[] {
     shareMonthly: t.shareMonthly,
     shareFixed: t.shareFixed,
     shareExternalName: t.shareExternalName ?? null,
+    shares: t.shares,
+    shareNames: t.shareNames,
     isGroup: t.isGroup ?? false,
     partnerShare: t.partnerShare ?? false,
     locked: t.locked ?? false,

@@ -8,6 +8,7 @@ import type {
   OfflineAccount,
   OfflineCategory,
   OfflineCharge,
+  OfflineCompanion,
   OfflineDebtPayment,
   OfflineGroup,
   OfflineLineSum,
@@ -41,6 +42,8 @@ export type SnapshotPayload = {
   catalog: OfflineCategory[]
   /** Lugares de compra del usuario (autocompletado del formulario). */
   places: OfflinePlace[]
+  /** Amigos del usuario (autocompletado del gasto en grupo). */
+  companions: OfflineCompanion[]
   subscriptions: OfflineSubscription[]
   charges: OfflineCharge[]
   cardPayItems: CardPayCandidate[]

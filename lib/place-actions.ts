@@ -11,7 +11,7 @@ import { auth } from '@/auth'
 function revalidateAll() {
   revalidatePath('/actividad')
   revalidatePath('/cuentas')
-  revalidatePath('/ajustes/lugares')
+  revalidatePath('/ajustes/listas')
 }
 
 const PlaceSchema = z.object({

@@ -52,6 +52,7 @@ model User {
   subscriptions         Subscription[]
   categories            Category[]
   places                Place[]
+  companions            Companion[]
   paymentsRegistered    DebtPayment[]        @relation("PaymentRegistrar")
   paymentsConfirmed     DebtPayment[]        @relation("PaymentConfirmer")
   settlementsRegistered GroupSettlement[]    @relation("SettlementRegistrar")
@@ -213,6 +214,26 @@ model Category {
 model Place {
   id         String   @id @default(cuid())
   name       String // capitalización original; se cambia desde Ajustes > Lugares
+  key        String // normalizado para dedup (trim + minúsculas)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastUsedAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, key])
+  @@index([userId, lastUsedAt])
+}
+
+// Amigos / compañeros de gasto del usuario para el autocompletado del
+// formulario de gasto en grupo (tab Otros): se guardan solos al
+// escribirlos, igual que los lugares. El share guarda su propio texto
+// (externalName congelado); aquí solo viven las sugerencias.
+// `key` (minúsculas) evita duplicados tipo "Juan" vs "JUAN".
+model Companion {
+  id         String   @id @default(cuid())
+  name       String // capitalización original; se cambia desde Ajustes > Listas
   key        String // normalizado para dedup (trim + minúsculas)
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)

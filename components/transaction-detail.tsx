@@ -93,7 +93,13 @@ export function TransactionDetail({
           {t.installments > 1 && (
             <Badge variant="warning">{t.installments} MSI</Badge>
           )}
-          {t.isShared && <Badge>Compartido</Badge>}
+          {t.isShared && (
+            <Badge>
+              {t.shareNames && t.shareNames.length > 1
+                ? `Compartido ×${t.shareNames.length}`
+                : 'Compartido'}
+            </Badge>
+          )}
           {transfer && (
             <Badge variant="secondary">
               {t.transferToAccountType === 'CREDIT'
@@ -133,8 +139,14 @@ export function TransactionDetail({
             }
           />
         )}
-        {t.shareExternalName && (
+        {t.shareExternalName && !t.shareNames && (
           <Row label="Compartido con" value={t.shareExternalName} />
+        )}
+        {t.shareNames && t.shareNames.length > 0 && (
+          <Row
+            label={`Compartido con ${t.shareNames.length + 1}`}
+            value={t.shareNames.join(', ')}
+          />
         )}
         {t.isGroup && (
           <Row

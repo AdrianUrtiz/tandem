@@ -9,10 +9,11 @@ import type { CardPayCandidate } from '@/lib/card-pay'
 // Versión del esquema Dexie. Subir en cada migración futura
 // (el sprint de creación offline añadirá índices/flags sin romper v2).
 // v8 agrega el índice `lastUsedAt` a `places` (el orden de sugerencias).
-export const DB_VERSION = 8
+// v9 agrega la tabla `companions` (amigos del gasto en grupo).
+export const DB_VERSION = 9
 export const DB_NAME = 'tandem-db'
 // Versión del payload de /api/snapshot que esta DB sabe guardar.
-export const SNAPSHOT_VERSION = 7
+export const SNAPSHOT_VERSION = 8
 
 export type SyncMeta = {
   key: string // siempre 'sync'
@@ -66,6 +67,14 @@ export type OfflineTransaction = {
   shareFixed?: boolean
   /** Nombre de la persona sin cuenta si el compartido es externo. */
   shareExternalName?: string | null
+  /** Gasto en grupo (v1): N partes explícitas. */
+  shares?: {
+    debtorId?: string | null
+    externalName?: string | null
+    amount: number
+  }[]
+  /** Nombres de todos los integrantes para detalle. */
+  shareNames?: string[]
   /** Gasto de un grupo (household): su reparto no se edita en el formulario. */
   isGroup?: boolean
   /** Período ("YYYY-MM") al que se aplica un pago aunque sea extemporáneo. */
@@ -122,6 +131,18 @@ export type OfflineCategory = {
 // nombre normalizado (trim + minúsculas).
 export type OfflinePlace = {
   /** Nombre normalizado (dedup "Oxxo" vs "OXXO"). */
+  key: string
+  /** Como lo escribió la última vez. */
+  name: string
+  /** ISO del último uso (orden de sugerencias). */
+  lastUsedAt: string
+}
+
+// Amigo / compañero de gasto para el autocompletado del formulario de
+// gasto en grupo (espejo de `Companion` del servidor). Misma semántica
+// que los lugares: solo sugerencias, los shares guardan su propio texto.
+export type OfflineCompanion = {
+  /** Nombre normalizado (dedup "Juan" vs "JUAN"). */
   key: string
   /** Como lo escribió la última vez. */
   name: string
@@ -233,6 +254,7 @@ class TandemDB extends Dexie {
   partnerShared!: Table<OfflinePartnerShared, string>
   groups!: Table<OfflineGroup, string>
   places!: Table<OfflinePlace, string>
+  companions!: Table<OfflineCompanion, string>
   outbox!: Table<OfflineOutboxOp, number>
 
   constructor() {
@@ -252,6 +274,7 @@ class TandemDB extends Dexie {
       partnerShared: 'id',
       groups: 'id',
       places: 'key, lastUsedAt',
+      companions: 'key, lastUsedAt',
       outbox: '++localId, createdAt, status',
     })
   }
@@ -294,6 +317,7 @@ export async function clearLocalData(): Promise<void> {
       db.partnerShared,
       db.groups,
       db.places,
+      db.companions,
       db.outbox,
     ],
     async () => {
@@ -312,6 +336,7 @@ export async function clearLocalData(): Promise<void> {
         db.partnerShared.clear(),
         db.groups.clear(),
         db.places.clear(),
+        db.companions.clear(),
         db.outbox.clear(),
       ])
     },

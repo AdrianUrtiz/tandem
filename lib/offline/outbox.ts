@@ -15,12 +15,17 @@ import { createTransaction } from '@/lib/actions'
 import { debtorMonthlyAmount } from '@/lib/calculations'
 import { fromCents, toCents } from '@/lib/money'
 import {
+  type OfflineCompanion,
   type OfflinePlace,
   type OfflineShare,
   type OfflineTransaction,
   db,
 } from '@/lib/offline/db'
 import { isPendingId, newTempShareId, newTempTxId } from '@/lib/offline/pending'
+import {
+  COMPANION_MAX_LEN,
+  COMPANION_MIN_LEN,
+} from '@/lib/companion-format'
 import { PLACE_MAX_LEN, PLACE_MIN_LEN } from '@/lib/place-format'
 import { parseWallInput } from '@/lib/walltime'
 
@@ -289,11 +294,12 @@ export async function enqueueOfflineCreate(
   }
   await db.transaction(
     'rw',
-    [db.transactions, db.shares, db.accounts, db.places, db.outbox],
+    [db.transactions, db.shares, db.accounts, db.places, db.companions, db.outbox],
     async () => {
       await applyEcho(payload)
-      // El lugar queda sugerido al instante aunque aún no suba.
+      // El lugar y el amigo quedan sugeridos al instante aunque aún no suba.
       await touchLocalPlace(payload.place)
+      await touchLocalCompanion(payload.externalName)
       await db.outbox.add({
         kind: OUTBOX_KIND_CREATE_TX,
         payload: JSON.stringify(payload),
@@ -318,6 +324,29 @@ async function touchLocalPlace(raw: string | null | undefined): Promise<void> {
     .get(key)
     .catch(() => undefined)
   await db.places
+    .put({
+      key,
+      name: prev?.name ?? name,
+      lastUsedAt: new Date().toISOString(),
+    })
+    .catch(() => undefined)
+}
+
+/**
+ * Guarda el amigo en la copia local (espejo de `touchCompanions` del
+ * servidor): la sugerencia aparece sin esperar la subida. Solo externos
+ * (la pareja nunca se guarda: viene del vínculo).
+ */
+async function touchLocalCompanion(
+  raw: string | null | undefined,
+): Promise<void> {
+  const name = (raw ?? '').trim().replace(/\s+/g, ' ').slice(0, COMPANION_MAX_LEN)
+  if (name.length < COMPANION_MIN_LEN) return
+  const key = name.toLowerCase()
+  const prev: OfflineCompanion | undefined = await db.companions
+    .get(key)
+    .catch(() => undefined)
+  await db.companions
     .put({
       key,
       name: prev?.name ?? name,

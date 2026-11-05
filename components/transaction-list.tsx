@@ -34,6 +34,14 @@ export type TxRow = {
   shareFixed?: boolean
   /** Nombre externo si el compartido es con alguien sin cuenta. */
   shareExternalName?: string | null
+  /** Gasto en grupo (v1): N partes explícitas. Monto total por integrante. */
+  shares?: {
+    debtorId?: string | null
+    externalName?: string | null
+    amount: number
+  }[]
+  /** Nombres de todos los integrantes (pareja + externos) para detalle. */
+  shareNames?: string[]
   /** Movimiento de un gasto de grupo: no se edita aquí su reparto. */
   isGroup?: boolean
   /** Parte que me toca de un gasto compartido de mi pareja (solo lectura). */

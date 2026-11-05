@@ -239,9 +239,9 @@ export function AjustesClient({
           <ChevronRight className="size-4 shrink-0 text-(--muted-foreground)" />
         </Link>
 
-        {/* Lugares (requiere conexión) */}
+        {/* Listas: lugares y amigos (requiere conexión) */}
         <Link
-          href="/ajustes/lugares"
+          href="/ajustes/listas"
           aria-disabled={!online}
           onClick={online ? undefined : (e) => e.preventDefault()}
           className={cn(
@@ -252,9 +252,9 @@ export function AjustesClient({
             <MapPin className="size-5" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-semibold">Lugares</span>
+            <span className="block text-sm font-semibold">Listas</span>
             <span className="block truncate text-xs text-(--muted-foreground)">
-              Gestiona tus lugares de compra
+              Gestiona tus lugares y amigos
             </span>
           </span>
           <ChevronRight className="size-4 shrink-0 text-(--muted-foreground)" />

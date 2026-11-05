@@ -13,6 +13,7 @@ import {
   MapPin,
   NotebookPen,
   Plus,
+  User,
   Users,
   Wallet,
 } from 'lucide-react'
@@ -33,6 +34,7 @@ import { Switch } from '@/components/ui/switch'
 import { createTransaction, updateTransaction } from '@/lib/actions'
 import type { CatalogRow } from '@/lib/catalog'
 import { useLiveQuery } from 'dexie-react-hooks'
+import type { CompanionRow } from '@/lib/companions'
 import {
   CATEGORY_COLORS,
   ICONS,
@@ -58,7 +60,7 @@ import {
 } from '@/lib/place-format'
 import { useOnlineStatus } from '@/lib/offline/useOnlineStatus'
 import { syncForce } from '@/lib/offline/useSnapshotSync'
-import { cn } from '@/lib/utils'
+import { cn, formatMoney } from '@/lib/utils'
 import {
   addWallDays,
   fmtDayMonth,
@@ -93,6 +95,10 @@ export type TxEditData = {
   shareMonthly?: number
   shareFixed?: boolean
   shareExternalName?: string | null
+  /** Gasto en grupo (v1): N partes explícitas. Monto total por integrante. */
+  shares?: { debtorId?: string | null; externalName?: string | null; amount: number }[]
+  /** Nombres de todos los integrantes (pareja + externos). */
+  shareNames?: string[]
   /** Gasto de grupo: su reparto no se edita desde aquí. */
   isGroup?: boolean
 }
@@ -109,8 +115,20 @@ const msiLabel = (m: number) => (m === 1 ? 'Contado' : `${m} MSI`)
 type Panel =
   null | 'cats' | 'account' | 'dest' | 'date' | 'addcat' | 'msi' | 'share' | 'desc'
 
-function shortDate(ymd: string) {
-  // Hora-muro (ver lib/walltime.ts): el día se interpreta en UTC para que
+/** "hoy" o "12 oct" para la fila de sugerencia de amigo. */
+function lastCompanionUse(iso: string): string {
+  const d = new Date(iso)
+  const today = new Date()
+  if (
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate()
+  )
+    return 'hoy'
+  return d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })
+}
+
+function shortDate(ymd: string) {  // Hora-muro (ver lib/walltime.ts): el día se interpreta en UTC para que
   // no se desfase según el runtime.
   const [y, m, d] = ymd.split('-').map(Number)
   return fmtDayMonth(utc(y, (m || 1) - 1, d || 1))
@@ -187,18 +205,35 @@ export function TransactionForm({
   )
   const [msi, setMsi] = useState(1)
   // Al editar un gasto compartido, prefill con su reparto actual.
+  // Tabs: Pareja (solo pareja, % o monto) y Otros (1+ integrantes).
   const editShare = editing && entry!.type === 'EXPENSE' && entry!.isShared
+  const editShares =
+    editShare && entry!.shares && entry!.shares.length > 0
+      ? entry!.shares
+      : null
+  // El gasto ya es grupo (2+ partes) → tab Otros fija; si no, según con
+  // quién sea el simple (externo → Otros, pareja → Pareja).
+  const isGroupEdit = (editShares?.length ?? 0) > 1
   const [shared, setShared] = useState(Boolean(editShare))
+  const [shareTab, setShareTab] = useState<'pareja' | 'otros'>(
+    isGroupEdit || (editShare && entry!.shareExternalName)
+      ? 'otros'
+      : 'pareja',
+  )
+  // — % o monto fijo (Tab Pareja y Tab Otros con 1 integrante) —
   const [shareMode, setShareMode] = useState<'pct' | 'amount'>(
-    editShare && entry!.shareFixed ? 'amount' : 'pct',
+    editShare && !isGroupEdit && entry!.shareFixed ? 'amount' : 'pct',
   )
   const [sharePct, setSharePct] = useState(
-    editShare && !entry!.shareFixed && entry!.sharePct != null
+    editShare && !isGroupEdit && !entry!.shareFixed && entry!.sharePct != null
       ? Math.round(entry!.sharePct)
       : 50,
   )
   const [shareAmt, setShareAmt] = useState(
-    editShare && entry!.shareFixed && entry!.shareMonthly != null
+    editShare &&
+      !isGroupEdit &&
+      entry!.shareFixed &&
+      entry!.shareMonthly != null
       ? String(
           fromCents(
             toCents(entry!.shareMonthly) * Math.max(1, entry!.installments),
@@ -206,14 +241,76 @@ export function TransactionForm({
         )
       : '',
   )
-  // Quién aporta: mi pareja o alguien sin cuenta (externalName).
-  const [shareWith, setShareWith] = useState<'partner' | 'external'>(
-    editShare && entry!.shareExternalName ? 'external' : 'partner',
+  // — Tab Otros: integrantes (pareja opcional + nombres libres).
+  // Al editar se prellena como importes explícitos (exacto).
+  const [splitMode, setSplitMode] = useState<'equal' | 'custom'>(
+    editShare ? 'custom' : 'equal',
   )
-  const [externalName, setExternalName] = useState(
-    editShare ? (entry!.shareExternalName ?? '') : '',
+  const [includePartner, setIncludePartner] = useState(
+    editShares
+      ? editShares.some((s) => s.debtorId)
+      : editShare
+        ? !entry!.shareExternalName
+        : false,
+  )
+  const [memberNames, setMemberNames] = useState<string[]>(() => {
+    if (editShares) {
+      return editShares
+        .map((s) => s.externalName)
+        .filter((n): n is string => Boolean(n))
+    }
+    return editShare && entry!.shareExternalName
+      ? [entry!.shareExternalName]
+      : []
+  })
+  const [memberDraft, setMemberDraft] = useState('')
+  const memberKeyOf = (name: string) => `ext:${name.trim().toLowerCase()}`
+  const [customAmounts, setCustomAmounts] = useState<Record<string, string>>(
+    () => {
+      if (editShares) {
+        const out: Record<string, string> = {}
+        for (const s of editShares) {
+          if (s.debtorId) out.__partner__ = String(s.amount)
+          else if (s.externalName)
+            out[memberKeyOf(s.externalName)] = String(s.amount)
+        }
+        return out
+      }
+      if (editShare && entry) {
+        // Legado (1 compartido): monto total que debe la otra persona.
+        const n = Math.max(1, entry.installments)
+        const total =
+          entry.shareFixed && entry.shareMonthly != null
+            ? fromCents(toCents(entry.shareMonthly) * n)
+            : fromCents(
+                Math.round(
+                  (toCents(entry.amount) * (entry.sharePct ?? 50)) / 100,
+                ),
+              )
+        if (entry.shareExternalName)
+          return { [memberKeyOf(entry.shareExternalName)]: String(total) }
+        return { __partner__: String(total) }
+      }
+      return {}
+    },
   )
   const [panel, setPanel] = useState<Panel>(null)
+  // Input de integrante (tab Otros): ref para devolverle el foco al añadir.
+  const memberRef = useRef<HTMLInputElement>(null)
+  // Alta de integrante: valida, evita duplicados (case-insensitive) y tope.
+  // La pareja homónima sí convive (identidad distinta: debtor vs texto).
+  function addMember(raw: string): boolean {
+    const clean = raw.trim().replace(/\s+/g, ' ')
+    if (clean.length < 1 || clean.length > 30) return false
+    if (
+      memberNames.some((x) => x.toLowerCase() === clean.toLowerCase())
+    )
+      return false
+    if (memberNames.length + (includePartner ? 1 : 0) >= 10) return false
+    setMemberNames((prev) => [...prev, clean])
+    setMemberDraft('')
+    return true
+  }
   // Al abrir el modal de descripción se enfoca su input (abre el teclado).
   useEffect(() => {
     if (panel !== 'desc') return
@@ -231,7 +328,8 @@ export function TransactionForm({
   const [pending, setPending] = useState(false)
   const [savingCat, setSavingCat] = useState(false)
   const online = useOnlineStatus()
-  // Nombre de la pareja (desde la copia local) para el panel Compartir.
+  // Nombre e id de la pareja (desde la copia local) para el panel Compartir.
+  // También al editar: hace falta el id para reescribir el share de pareja.
   const [partnerName, setPartnerName] = useState<string | null>(null)
   // Lugares guardados (Dexie-first + fallback API en primera carga).
   const localPlaces = useLiveQuery(
@@ -262,6 +360,55 @@ export function TransactionForm({
     () => (localPlaces?.length ? localPlaces : (remotePlaces ?? [])),
     [localPlaces, remotePlaces],
   )
+  // Amigos guardados (Dexie-first + fallback API en primera carga).
+  const localCompanions = useLiveQuery(
+    () => db.companions.orderBy('lastUsedAt').reverse().toArray(),
+    [],
+  )
+  const [remoteCompanions, setRemoteCompanions] = useState<CompanionRow[] | null>(
+    null,
+  )
+  useEffect(() => {
+    if (
+      !online ||
+      localCompanions === undefined ||
+      localCompanions.length > 0 ||
+      remoteCompanions !== null
+    )
+      return
+    let alive = true
+    fetch('/api/companions', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (alive && j && Array.isArray(j.companions))
+          setRemoteCompanions(j.companions)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [online, localCompanions, remoteCompanions])
+  const companions = useMemo(
+    () =>
+      localCompanions?.length
+        ? localCompanions
+        : (remoteCompanions ?? []),
+    [localCompanions, remoteCompanions],
+  )
+  // Sugerencias de amigos: recientes primero, filtran mientras se escribe
+  // (excluye el texto exacto ya escrito y los ya agregados).
+  const memberQ = memberDraft.trim().toLowerCase()
+  const memberExists = companions.some(
+    (c) => c.name.toLowerCase() === memberQ,
+  )
+  const memberSuggestions = useMemo(() => {
+    const added = new Set(memberNames.map((n) => n.toLowerCase()))
+    return companions
+      .filter((c) => c.name.toLowerCase() !== memberQ)
+      .filter((c) => !added.has(c.name.toLowerCase()))
+      .filter((c) => !memberQ || c.name.toLowerCase().includes(memberQ))
+      .slice(0, 6)
+  }, [companions, memberQ, memberNames])
 
   // Al editar un gasto, parte el concepto guardado ("desc - lugar"):
   // ajuste durante el render (una sola vez por montaje, cuando la lista
@@ -295,26 +442,25 @@ export function TransactionForm({
   }, [places, placeQ])
 
   useEffect(() => {
-    if (editing) return
     let alive = true
     resolvePartner()
       .then((p) => {
-        if (alive && p) setPartnerName(p.name)
+        if (alive && p) {
+          setPartnerName(p.name)
+        }
       })
       .catch(() => undefined)
     return () => {
       alive = false
     }
-  }, [editing])
+  }, [])
 
-  // ¿Se puede compartir con la pareja? Al editar un compartido de pareja no
-  // se resuelve el nombre (no hay red al abrir), así que se asume que sí.
+  // ¿Se puede incluir a la pareja en Otros? Igual que antes: si hay
+  // vínculo, o al editar un compartido que ya la incluye.
   const partnerAvailable =
     Boolean(partnerName) ||
-    Boolean(editing && entry?.isShared && !entry?.shareExternalName)
-  // Sin pareja, solo queda compartir con alguien sin cuenta (derivado, sin
-  // estado extra que provoque renders en cascada).
-  const effectiveShareWith = partnerAvailable ? shareWith : 'external'
+    Boolean(editing && entry?.isShared && !entry?.shareExternalName) ||
+    Boolean(editShares?.some((s) => s.debtorId))
 
   // Al crear una categoría, llega por `localRows` y —tras revalidar el
   // servidor— también por el prop `cats`: se deduplica por código para
@@ -419,14 +565,66 @@ export function TransactionForm({
     accountOptions.find((a) => a.id === shownDest)?.name ?? 'Cuenta'
 
   // Vista previa del reparto (total y mensual según MSI, en centavos).
-  // sharePct = % que aporta LA OTRA PERSONA (igual que en suscripciones);
-  // tú pagas el total ahora y te debe su parte.
+  // Gasto en grupo: tú pagas el total ahora y cada integrante te debe su parte.
+  // Los integrantes siempre consumen; tú eliges si participas o no
+  // (si no, todo te lo deben). Igual que el pagador en gastos de grupo.
   const totalC = toCents(amount || '0')
   const per = editing ? Math.max(1, entry!.installments) : Math.max(1, msi)
-  const otherName =
-    effectiveShareWith === 'external'
-      ? externalName.trim() || 'la otra persona'
-      : (partnerName ?? 'tu pareja')
+  const debtorCount = memberNames.length + (includePartner ? 1 : 0)
+  const [iParticipate, setIParticipate] = useState(true)
+  // Divisor en iguales: deudores + tú (si participas).
+  const participantCount = debtorCount + (iParticipate ? 1 : 0)
+  // Nombres de integrantes para mostrar (pareja primero).
+  const debtorLabels: { key: string; label: string }[] = [
+    ...(includePartner
+      ? [{ key: '__partner__', label: partnerName ?? 'Mi pareja' }]
+      : []),
+    ...memberNames.map((n) => ({ key: memberKeyOf(n), label: n })),
+  ]
+  // Reparto igual con centavos exactos (el resto se reparte +1¢ al inicio;
+  // si participas, tu lugar va primero para que cuadre con el total).
+  const debtorKeys = debtorLabels.map((d) => d.key).join('|')
+  const equalAmounts = useMemo(() => {
+    const out = new Map<string, number>()
+    if (totalC <= 0 || debtorCount === 0 || participantCount <= 0) return out
+    const base = Math.floor(totalC / participantCount)
+    const rem = totalC % participantCount
+    // Orden de participantes: [yo?, ...deudores].
+    const order = [
+      ...(iParticipate ? ['__me__'] : []),
+      ...debtorLabels.map((d) => d.key),
+    ]
+    order.forEach((key, idx) => {
+      if (key === '__me__') return
+      out.set(key, fromCents(base + (idx < rem ? 1 : 0)))
+    })
+    return out
+  }, [totalC, debtorCount, participantCount, debtorKeys, iParticipate])
+  const equalOwedC =
+    [...equalAmounts.values()].reduce((a, v) => a + toCents(String(v)), 0) || 0
+  const equalMine = fromCents(Math.max(0, totalC - equalOwedC))
+  const customSumC = debtorLabels.reduce(
+    (a, d) => a + (toCents(customAmounts[d.key] || '0') || 0),
+    0,
+  )
+  const customMine = fromCents(Math.max(0, totalC - customSumC))
+  // Con tu participación el resto lo absorbes tú; sin ella, las partes
+  // deben sumar el total exacto.
+  const customValid =
+    debtorCount > 0 &&
+    totalC > 0 &&
+    customSumC > 0 &&
+    (iParticipate ? customSumC - totalC <= 0 : customSumC === totalC) &&
+    debtorLabels.every((d) => toCents(customAmounts[d.key] || '0') > 0)
+  const owedTotal =
+    splitMode === 'equal' ? fromCents(equalOwedC) : fromCents(customSumC)
+  // — Nombre de la contraparte para el selector %/monto —
+  // Tab Pareja: siempre la pareja. Tab Otros con 1 integrante: ese integrante.
+  const parejaName = partnerName ?? 'tu pareja'
+  const otrosSingleName =
+    debtorCount === 1 ? debtorLabels[0].label : 'la otra persona'
+  const singleName = shareTab === 'pareja' ? parejaName : otrosSingleName
+  // sharePct = % que aporta LA OTRA PERSONA; tú pagas el total ahora.
   const pctMonthly = fromCents(
     Math.round(Math.round((totalC * sharePct) / 100) / per),
   )
@@ -434,13 +632,23 @@ export function TransactionForm({
   const amtMonthly = fromCents(Math.round(amtC / per))
   const amtNum = fromCents(amtC)
   const amtPct = totalC > 0 ? (amtC / totalC) * 100 : 0
-  const shareLabel = !shared
-    ? 'Compartir'
-    : shareMode === 'pct'
+  const singleLabel =
+    shareMode === 'pct'
       ? `${sharePct}%`
       : shareAmt
         ? `$${fmtAmount(shareAmt)}`
         : 'Monto'
+  const grupoLabel =
+    debtorCount === 0
+      ? 'Compartir'
+      : debtorCount === 1
+        ? `${debtorLabels[0].label} · ${singleLabel}`
+        : `${debtorCount + 1} personas`
+  const shareLabel = !shared
+    ? 'Compartir'
+    : shareTab === 'pareja'
+      ? singleLabel
+      : grupoLabel
 
   // Sanea lo que llega del teclado numérico nativo: dígitos y un punto
   // con hasta 2 decimales. Devuelve null si supera los 9 dígitos.
@@ -455,6 +663,101 @@ export function TransactionForm({
     next = next.replace(/^0+(?=\d)/, '')
     if (next.replace('.', '').length > 9) return null
     return next
+  }
+
+  // Selector % / monto fijo para 1 contraparte (Tab Pareja con tu pareja,
+// Tab Otros con su único integrante). Usa el estado compartido
+// shareMode/sharePct/shareAmt y singleName según la tab activa.
+function renderSinglePanels() {
+    return (
+      <>
+        <div>
+          <p className="mb-1.5 text-center text-xs font-semibold text-(--muted-foreground)">
+            ¿Cuánto te debe?
+          </p>
+          <div className="mx-auto grid w-fit grid-cols-2 gap-2 rounded-full bg-(--muted) p-1">
+            {(['pct', 'amount'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setShareMode(m)}
+                className={cn(
+                  'rounded-full px-5 py-2 text-sm font-semibold',
+                  shareMode === m
+                    ? 'bg-(--card) shadow'
+                    : 'text-(--muted-foreground)',
+                )}>
+                {m === 'pct' ? 'Porcentaje' : 'Cantidad fija'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {shareMode === 'pct' ? (
+          <div className="space-y-2 rounded-3xl border border-(--border) p-4">
+            <p className="text-center text-4xl font-extrabold tabular-nums">
+              {sharePct}%
+            </p>
+            <input
+              type="range"
+              min={1}
+              max={100}
+              value={sharePct}
+              onChange={(e) => setSharePct(Number(e.target.value))}
+              aria-label="Porcentaje que aporta la otra persona"
+              className="w-full accent-(--primary)"
+            />
+            <div className="flex justify-between text-[11px] text-(--muted-foreground)">
+              <span>Tú {100 - sharePct}%</span>
+              <span>
+                {singleName} {sharePct}%
+              </span>
+            </div>
+            <p className="text-center text-sm">
+              {singleName} te debe{' '}
+              <b>
+                ${fmtAmount(toFixedCents(pctMonthly))}/mes
+                {per > 1 ? ` × ${per}` : ''}
+              </b>{' '}
+              de ${fmtAmount(amount || '0')}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2 rounded-3xl border border-(--border) p-4">
+            <Label htmlFor="share-amt">
+              ¿Cuánto te debe {singleName} en total?
+            </Label>
+            <div className="flex items-center gap-2">
+              <span className="text-xl font-bold text-(--muted-foreground)">
+                $
+              </span>
+              <Input
+                id="share-amt"
+                type="number"
+                min={0.01}
+                step={0.01}
+                value={shareAmt}
+                onChange={(e) => setShareAmt(e.target.value)}
+                placeholder="125"
+                inputMode="decimal"
+              />
+            </div>
+            {amtNum > 0 && (
+              <p className="text-center text-sm">
+                Equivale al <b>{amtPct.toFixed(1)}%</b> ·{' '}
+                <b>
+                  ${fmtAmount(toFixedCents(amtMonthly))}/mes
+                  {per > 1 ? ` × ${per}` : ''}
+                </b>
+              </p>
+            )}
+            <p className="text-center text-[11px] text-(--muted-foreground)">
+              Monto fijo pactado: no cambiará aunque edites el total
+            </p>
+          </div>
+        )}
+      </>
+    )
   }
 
   async function submit() {
@@ -494,34 +797,101 @@ export function TransactionForm({
     fd.set('accountId', accountId)
     if (mode === 'pago') fd.set('transferToAccountId', shownDest)
     // Compartido (solo gastos individuales): aplica al crear y al editar.
+    // Tab Pareja: solo pareja, formato legado (sharePct/shareAmount).
+    // Tab Otros: 1 integrante → legado (sharePct/shareAmount + externalName
+    // si no es pareja); 2+ → N partes vía sharesJson.
     const shareEditable = mode === 'cargo' && !(editing && entry?.isGroup)
+    // Solo tab Otros con 2+: la tab Pareja y Otros-con-1 usan legado.
+    const otrosMulti =
+      shareEditable && mode === 'cargo' && shared && shareTab === 'otros' && debtorCount > 1
+    // Construye las partes (iguales o importes) antes de validar red.
+    let multiParts: { debtorId?: string; externalName?: string; amount: number }[] | null = null
+    if (otrosMulti) {
+      if (splitMode === 'equal') {
+        if (!(totalC > 0)) {
+          setMsg('Ingresa el monto total primero')
+          setPending(false)
+          return
+        }
+        multiParts = debtorLabels.map((d) => {
+          const amt = equalAmounts.get(d.key) ?? 0
+          return d.key === '__partner__'
+            ? { debtorId: '__PARTNER__', amount: amt }
+            : { externalName: d.label, amount: amt }
+        })
+      } else {
+        if (!customValid) {
+          setMsg(
+            customSumC - totalC > 0
+              ? 'La suma de las partes no puede ser mayor al total'
+              : !iParticipate
+                ? 'Sin tu parte, deben sumar el total exacto'
+                : 'Reparte el monto entre integrantes',
+          )
+          setPending(false)
+          return
+        }
+        multiParts = debtorLabels.map((d) => {
+          const amt = fromCents(toCents(customAmounts[d.key] || '0'))
+          return d.key === '__partner__'
+            ? { debtorId: '__PARTNER__', amount: amt }
+            : { externalName: d.label, amount: amt }
+        })
+      }
+    }
     if (shareEditable) {
       if (!editing) fd.set('installments', String(msi))
-      fd.set('isShared', shared ? 'true' : 'false')
-      if (shared) {
-        if (effectiveShareWith === 'external') {
-          if (!externalName.trim()) {
-            setMsg('Escribe con quién compartes')
-            setPending(false)
-            return
-          }
-          fd.set('externalName', externalName.trim())
+      if (otrosMulti) {
+        fd.set('isShared', 'true')
+        if (multiParts && multiParts.length > 0) {
+          // La pareja se resuelve en el servidor (getPartnerId); aquí viaja
+          // la marca y el servidor la valida contra el vínculo real.
+          const wire = multiParts.map((p) =>
+            p.debtorId === '__PARTNER__'
+              ? { debtorId: '__PARTNER__', amount: p.amount }
+              : { externalName: p.externalName, amount: p.amount },
+          )
+          fd.set('sharesJson', JSON.stringify(wire))
         }
-        if (shareMode === 'pct') {
-          fd.set('sharePct', String(sharePct)) // % que aporta la otra persona
-        } else {
-          const amtC = toCents(shareAmt || '0')
-          if (
-            !shareAmt ||
-            Number.isNaN(amtC) ||
-            amtC <= 0 ||
-            amtC > toCents(value)
-          ) {
-            setMsg('La aportación debe ser mayor a 0 y no mayor al total')
+      } else if (shareTab === 'otros' && shared && debtorCount === 0) {
+        setMsg('Agrega al menos un integrante')
+        setPending(false)
+        return
+      } else {
+        fd.set('isShared', shared ? 'true' : 'false')
+        if (shared) {
+          // Tab Pareja: siempre la pareja (el servidor la resuelve).
+          if (shareTab === 'pareja' && !partnerAvailable) {
+            setMsg('Vincula una pareja en Ajustes para compartir')
             setPending(false)
             return
           }
-          fd.set('shareAmount', String(fromCents(amtC)))
+          if (shareTab === 'otros' && debtorCount === 1 && !includePartner) {
+            // Tab Otros con 1 integrante externo: viaja su nombre.
+            const onlyName = memberNames[0]?.trim()
+            if (!onlyName) {
+              setMsg('Escribe con quién compartes')
+              setPending(false)
+              return
+            }
+            fd.set('externalName', onlyName)
+          }
+          if (shareMode === 'pct') {
+            fd.set('sharePct', String(sharePct)) // % que aporta la otra persona
+          } else {
+            const amtC = toCents(shareAmt || '0')
+            if (
+              !shareAmt ||
+              Number.isNaN(amtC) ||
+              amtC <= 0 ||
+              amtC > toCents(value)
+            ) {
+              setMsg('La aportación debe ser mayor a 0 y no mayor al total')
+              setPending(false)
+              return
+            }
+            fd.set('shareAmount', String(fromCents(amtC)))
+          }
         }
       }
     }
@@ -537,18 +907,35 @@ export function TransactionForm({
         setPending(false)
         return
       }
+      // Tab Otros con 2+: sin red se pide conexión (cola legacy = 1).
+      // Tab Pareja y Otros-con-1 usan el formato legado del fd.
+      const strOrUndef = (v: FormDataEntryValue | null) =>
+        v == null ? undefined : String(v)
+      let wireCount = 0
+      try {
+        const rawWire = fd.get('sharesJson')
+        if (typeof rawWire === 'string' && rawWire) {
+          const parsedWire: unknown = JSON.parse(rawWire)
+          if (Array.isArray(parsedWire)) wireCount = parsedWire.length
+        }
+      } catch {
+        wireCount = 0
+      }
+      if (mode === 'cargo' && shared && wireCount > 1) {
+        setMsg('Conéctate para dividir entre varias personas')
+        setPending(false)
+        return
+      }
       // Deudor desde la copia local (el servidor ya no puede resolverlo).
       // Con externo no hay id: solo viaja el nombre.
       let debtor: { id: string; name: string } | null = null
-      if (mode === 'cargo' && shared && effectiveShareWith === 'partner') {
+      if (mode === 'cargo' && shared && !strOrUndef(fd.get('externalName'))) {
         try {
           debtor = await resolvePartner()
         } catch {
           debtor = null
         }
       }
-      const strOrUndef = (v: FormDataEntryValue | null) =>
-        v == null ? undefined : String(v)
       const transferId = strOrUndef(fd.get('transferToAccountId'))
       const shareAmountRaw = strOrUndef(fd.get('shareAmount'))
       const input: EnqueueInput = {
@@ -848,7 +1235,9 @@ export function TransactionForm({
         mode === 'cargo' &&
         (entry!.installments > 1 || entry!.isShared) && (
           <p className="mt-2 text-center text-[11px] text-(--muted-foreground)">
-            MSI y compartido no se modifican
+            {entry!.installments > 1
+              ? 'Los MSI no se modifican'
+              : 'Si hay pagos registrados, el reparto ya no se puede cambiar'}
           </p>
         )}
 
@@ -1066,22 +1455,38 @@ export function TransactionForm({
         </DialogContent>
       </Dialog>
 
-      {/* Panel: dividir gasto (porcentaje o cantidad fija) */}
+      {/* Panel: dividir gasto en grupo (N integrantes, iguales o importes) */}
       <Dialog
         open={panel === 'share'}
         onOpenChange={(o) => !o && setPanel(null)}>
-        <DialogContent>
+        <DialogContent className="max-h-[86dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Dividir gasto</DialogTitle>
           </DialogHeader>
           <div className="flex items-center justify-between rounded-2xl border border-(--border) px-4 py-3">
             <div>
               <p className="text-sm font-semibold">
-                {shared ? `Dividido con ${otherName}` : 'Dividir este gasto'}
+                {shareTab === 'pareja'
+                  ? shared
+                    ? `Dividido con ${singleName}`
+                    : 'Dividir este gasto'
+                  : shared && debtorCount === 1
+                    ? `Dividido con ${singleName}`
+                    : shared && debtorCount > 1
+                      ? `Dividido entre ${participantCount}`
+                      : 'Dividir este gasto'}
               </p>
               <p className="text-xs text-(--muted-foreground)">
                 Tú pagas el total ahora
-                {shared ? ` · ${otherName} te debe su parte` : ''}
+                {shareTab === 'pareja'
+                  ? shared
+                    ? ` · ${singleName} te debe su parte`
+                    : ''
+                  : shared && debtorCount === 1
+                    ? ` · ${singleName} te debe su parte`
+                    : shared && debtorCount > 1
+                      ? ` · te deben ${formatMoney(owedTotal)}`
+                      : ''}
               </p>
             </div>
             <Switch
@@ -1091,133 +1496,326 @@ export function TransactionForm({
             />
           </div>
 
-          {shared && (
+          {shared && !isGroupEdit && (
+            <div>
+              <p className="mb-1.5 text-center text-xs font-semibold text-(--muted-foreground)">
+                ¿Cómo lo divides?
+              </p>
+              <div className="mx-auto grid w-fit grid-cols-2 gap-2 rounded-full bg-(--muted) p-1">
+                {(['pareja', 'otros'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setShareTab(t)}
+                    className={cn(
+                      'rounded-full px-5 py-2 text-sm font-semibold',
+                      shareTab === t
+                        ? 'bg-(--card) shadow'
+                        : 'text-(--muted-foreground)',
+                    )}>
+                    {t === 'pareja' ? 'Pareja' : 'Otros'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {shared && shareTab === 'pareja' && (
             <>
-              {/* Con quién: mi pareja (si hay vínculo) o alguien sin cuenta. */}
-              {partnerAvailable && (
-                <div>
-                  <p className="mb-1.5 text-center text-xs font-semibold text-(--muted-foreground)">
-                    ¿Con quién lo divides?
-                  </p>
-                  <div className="mx-auto grid w-fit grid-cols-2 gap-2 rounded-full bg-(--muted) p-1">
-                    {(['partner', 'external'] as const).map((w) => (
+              {renderSinglePanels()}
+
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => setPanel(null)}>
+                Listo
+              </Button>
+            </>
+          )}
+
+          {shared && shareTab === 'otros' && (
+            <>
+              {/* Integrantes: pareja (si hay vínculo) + nombres libres.
+                  La pareja y un homónimo escrito son 2 integrantes distintos. */}
+              <div className="space-y-1.5">
+                <Label>Quiénes participan</Label>
+                <div className="flex flex-wrap gap-2">
+                  {includePartner && (
+                    <span className="flex items-center gap-1.5 rounded-full border border-(--primary)/40 bg-(--primary)/10 py-1.5 pr-2 pl-4 text-sm font-semibold">
+                      {partnerName ?? 'Mi pareja'}
+                      <span className="text-[11px] font-bold text-(--primary)">
+                        · pareja
+                      </span>
                       <button
-                        key={w}
                         type="button"
-                        onClick={() => setShareWith(w)}
-                        className={cn(
-                          'rounded-full px-5 py-2 text-sm font-semibold',
-                          effectiveShareWith === w
-                            ? 'bg-(--card) shadow'
-                            : 'text-(--muted-foreground)',
-                        )}>
-                        {w === 'partner'
-                          ? (partnerName ?? 'Mi pareja')
-                          : 'Otra persona'}
+                        onClick={() => {
+                          setIncludePartner(false)
+                          setCustomAmounts((prev) => {
+                            const next = { ...prev }
+                            delete next.__partner__
+                            return next
+                          })
+                        }}
+                        aria-label="Quitar a tu pareja"
+                        className="flex size-6 items-center justify-center rounded-full bg-(--card) text-xs shadow transition active:scale-95">
+                        ×
                       </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {effectiveShareWith === 'external' && (
-                <div className="space-y-2">
-                  <Label htmlFor="share-name">Nombre de la otra persona</Label>
-                  <Input
-                    id="share-name"
-                    value={externalName}
-                    onChange={(e) => setExternalName(e.target.value)}
-                    placeholder="Mamá, Juan, compañero…"
-                    maxLength={40}
-                    autoComplete="off"
-                  />
-                </div>
-              )}
-
-              <div>
-                <p className="mb-1.5 text-center text-xs font-semibold text-(--muted-foreground)">
-                  ¿Cuánto te debe?
-                </p>
-                <div className="mx-auto grid w-fit grid-cols-2 gap-2 rounded-full bg-(--muted) p-1">
-                  {(['pct', 'amount'] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setShareMode(m)}
-                      className={cn(
-                        'rounded-full px-5 py-2 text-sm font-semibold',
-                        shareMode === m
-                          ? 'bg-(--card) shadow'
-                          : 'text-(--muted-foreground)',
-                      )}>
-                      {m === 'pct' ? 'Porcentaje' : 'Cantidad fija'}
-                    </button>
+                    </span>
+                  )}
+                  {memberNames.map((n) => (
+                    <span
+                      key={memberKeyOf(n)}
+                      className="flex items-center gap-1.5 rounded-full border border-(--border) bg-(--muted) py-1.5 pr-2 pl-4 text-sm font-semibold">
+                      {n}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMemberNames((prev) =>
+                            prev.filter(
+                              (x) => x.toLowerCase() !== n.toLowerCase(),
+                            ),
+                          )
+                          setCustomAmounts((prev) => {
+                            const next = { ...prev }
+                            delete next[memberKeyOf(n)]
+                            return next
+                          })
+                        }}
+                        aria-label={`Quitar a ${n}`}
+                        className="flex size-6 items-center justify-center rounded-full bg-(--card) text-xs shadow transition active:scale-95">
+                        ×
+                      </button>
+                    </span>
                   ))}
+                  {!includePartner && memberNames.length === 0 && (
+                    <span className="text-xs text-(--muted-foreground)">
+                      Agrega a tu pareja o escribe nombres abajo.
+                    </span>
+                  )}
                 </div>
               </div>
 
-              {shareMode === 'pct' ? (
-                <div className="space-y-2 rounded-3xl border border-(--border) p-4">
-                  <p className="text-center text-4xl font-extrabold tabular-nums">
-                    {sharePct}%
-                  </p>
-                  <input
-                    type="range"
-                    min={1}
-                    max={100}
-                    value={sharePct}
-                    onChange={(e) => setSharePct(Number(e.target.value))}
-                    aria-label="Porcentaje que aporta la otra persona"
-                    className="w-full accent-(--primary)"
-                  />
-                  <div className="flex justify-between text-[11px] text-(--muted-foreground)">
-                    <span>Tú {100 - sharePct}%</span>
-                    <span>
-                      {otherName} {sharePct}%
-                    </span>
-                  </div>
-                  <p className="text-center text-sm">
-                    {otherName} te debe{' '}
-                    <b>
-                      ${fmtAmount(toFixedCents(pctMonthly))}/mes
-                      {per > 1 ? ` × ${per}` : ''}
-                    </b>{' '}
-                    de ${fmtAmount(amount || '0')}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2 rounded-3xl border border-(--border) p-4">
-                  <Label htmlFor="share-amt">
-                    ¿Cuánto te debe {otherName} en total?
-                  </Label>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl font-bold text-(--muted-foreground)">
-                      $
-                    </span>
+              {partnerAvailable && !includePartner && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => setIncludePartner(true)}>
+                  + Incluir a {partnerName ?? 'mi pareja'}
+                </Button>
+              )}
+
+              <div className="space-y-1.5">
+                <Label htmlFor="tx-member">Agregar integrante</Label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <User className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-(--muted-foreground)" />
                     <Input
-                      id="share-amt"
-                      type="number"
-                      min={0.01}
-                      step={0.01}
-                      value={shareAmt}
-                      onChange={(e) => setShareAmt(e.target.value)}
-                      placeholder="125"
-                      inputMode="decimal"
+                      id="tx-member"
+                      ref={memberRef}
+                      role="combobox"
+                      aria-expanded={memberSuggestions.length > 0}
+                      aria-controls="tx-member-list"
+                      aria-autocomplete="list"
+                      value={memberDraft}
+                      onChange={(e) => setMemberDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          if (addMember(memberDraft))
+                            memberRef.current?.focus()
+                        }
+                      }}
+                      placeholder="Buscar o escribir un nombre…"
+                      maxLength={30}
+                      autoComplete="off"
+                      className="pl-10"
                     />
                   </div>
-                  {amtNum > 0 && (
-                    <p className="text-center text-sm">
-                      Equivale al <b>{amtPct.toFixed(1)}%</b> ·{' '}
-                      <b>
-                        ${fmtAmount(toFixedCents(amtMonthly))}/mes
-                        {per > 1 ? ` × ${per}` : ''}
-                      </b>
+                  <Button
+                    type="button"
+                    disabled={!memberDraft.trim()}
+                    onClick={() => {
+                      if (addMember(memberDraft)) memberRef.current?.focus()
+                    }}>
+                    Añadir
+                  </Button>
+                </div>
+                {memberSuggestions.length > 0 ? (
+                  <ul
+                    id="tx-member-list"
+                    role="listbox"
+                    aria-label="Amigos guardados"
+                    className="max-h-56 space-y-1 overflow-y-auto">
+                    {memberSuggestions.map((c) => (
+                      <li key={c.name.toLowerCase()} role="option" aria-selected={false}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (addMember(c.name)) memberRef.current?.focus()
+                          }}
+                          className="flex w-full items-center gap-2 rounded-2xl px-4 py-2.5 text-left text-sm font-semibold transition hover:bg-(--muted)">
+                          <User className="size-4 shrink-0 text-(--muted-foreground)" />
+                          <span className="flex-1 truncate">{c.name}</span>
+                          <span className="shrink-0 text-[11px] font-medium text-(--muted-foreground)">
+                            {lastCompanionUse(c.lastUsedAt)}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  memberQ &&
+                  !memberExists && (
+                    <p className="text-center text-xs text-(--muted-foreground)">
+                      Se guardará «{memberDraft.trim()}» como nuevo amigo.
+                    </p>
+                  )
+                )}
+              </div>
+
+              {debtorCount <= 1 ? (
+                <>
+                  {debtorCount === 1 && renderSinglePanels()}
+                  {debtorCount === 0 && (
+                    <p className="text-center text-xs text-(--muted-foreground)">
+                      Agrega al menos un integrante arriba para repartir.
                     </p>
                   )}
-                  <p className="text-center text-[11px] text-(--muted-foreground)">
-                    Monto fijo pactado: no cambiará aunque edites el total
-                  </p>
-                </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between rounded-2xl border border-(--border) px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold">
+                        ¿Tú también participas?
+                      </p>
+                      <p className="text-xs text-(--muted-foreground)">
+                        {iParticipate
+                          ? 'Consumes tu parte del gasto'
+                          : 'Pagaste todo, nada es para ti'}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={iParticipate}
+                      onCheckedChange={setIParticipate}
+                      aria-label="Yo también participo del gasto"
+                    />
+                  </div>
+                  <div>
+                    <p className="mb-1.5 text-center text-xs font-semibold text-(--muted-foreground)">
+                      ¿Cuánto te debe cada uno?
+                    </p>
+                    <div className="mx-auto grid w-fit grid-cols-2 gap-2 rounded-full bg-(--muted) p-1">
+                      {(['equal', 'custom'] as const).map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setSplitMode(m)}
+                          className={cn(
+                            'rounded-full px-5 py-2 text-sm font-semibold',
+                            splitMode === m
+                              ? 'bg-(--card) shadow'
+                              : 'text-(--muted-foreground)',
+                          )}>
+                          {m === 'equal' ? 'Iguales' : 'Importes'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {splitMode === 'equal' ? (
+                    <div className="space-y-2 rounded-3xl border border-(--border) p-4">
+                      <ul className="space-y-1.5">
+                        {debtorLabels.map((d) => (
+                          <li
+                            key={d.key}
+                            className="flex items-center justify-between gap-2 text-sm">
+                            <span className="truncate font-semibold">
+                              {d.label}
+                            </span>
+                            <b className="shrink-0 tabular-nums">
+                              {totalC > 0
+                                ? formatMoney(equalAmounts.get(d.key) ?? 0)
+                                : '—'}
+                            </b>
+                          </li>
+                        ))}
+                      </ul>
+                      {totalC > 0 && (
+                        <p className="text-center text-sm">
+                          Te deben{' '}
+                          <b>{formatMoney(fromCents(equalOwedC))} en total</b>{' '}
+                          {iParticipate ? (
+                            <>
+                              · tú absorbes {formatMoney(equalMine)}
+                              {per > 1
+                                ? ` (${formatMoney(fromCents(Math.round(equalOwedC / per)))}/mes)`
+                                : ''}
+                            </>
+                          ) : (
+                            <>· tú no consumes nada</>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2 rounded-3xl border border-(--border) p-4">
+                      <ul className="space-y-1.5">
+                        {debtorLabels.map((d) => (
+                          <li
+                            key={d.key}
+                            className="flex items-center gap-2 text-sm">
+                            <span className="min-w-0 flex-1 truncate font-semibold">
+                              {d.label}
+                            </span>
+                            <span className="flex shrink-0 items-center gap-1">
+                              <span className="text-xs font-bold text-(--muted-foreground)">
+                                $
+                              </span>
+                              <Input
+                                value={customAmounts[d.key] ?? ''}
+                                onChange={(e) => {
+                                  const next = sanitizeAmount(e.target.value)
+                                  if (next === null) return
+                                  setCustomAmounts((prev) => ({
+                                    ...prev,
+                                    [d.key]: next,
+                                  }))
+                                }}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
+                                inputMode="decimal"
+                                autoComplete="off"
+                                aria-label={`Importe de ${d.label}`}
+                                className="h-9 w-24 px-2 text-right text-sm font-bold tabular-nums"
+                              />
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p
+                        className={cn(
+                          'text-center text-xs font-semibold',
+                          customSumC - totalC > 0
+                            ? 'text-red-500'
+                            : customValid
+                              ? 'text-emerald-500'
+                              : 'text-(--muted-foreground)',
+                        )}>
+                        Suman {formatMoney(fromCents(customSumC))} de{' '}
+                        {formatMoney(fromCents(totalC))}
+                        {customValid
+                          ? iParticipate
+                            ? ` · tú absorbes ${formatMoney(customMine)} ✓`
+                            : ' · te lo deben todo ✓'
+                          : !iParticipate
+                            ? ' · deben sumar el total'
+                            : ''}
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
 
               <Button
