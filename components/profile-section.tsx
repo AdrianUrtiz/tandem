@@ -3,17 +3,27 @@
 import { useState } from 'react'
 
 import {
+  Apple,
+  Bird,
+  Camera,
   Cat,
   Check,
+  Crown,
   Dog,
+  Fish,
+  Flower2,
+  Gamepad2,
   Ghost,
   Heart,
+  Moon,
   Music,
   Pencil,
   Rocket,
   Smile,
   Star,
+  Sun,
   User,
+  Zap,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -39,6 +49,16 @@ const ICON_COMPONENTS: Record<string, typeof User> = {
   Ghost,
   Rocket,
   Music,
+  Crown,
+  Zap,
+  Sun,
+  Moon,
+  Flower2,
+  Fish,
+  Bird,
+  Apple,
+  Camera,
+  Gamepad2,
 }
 
 const ICON_LABELS: Record<string, string> = {
@@ -52,22 +72,50 @@ const ICON_LABELS: Record<string, string> = {
   Ghost: 'Fantasma',
   Rocket: 'Cohete',
   Music: 'Música',
+  Crown: 'Corona',
+  Zap: 'Rayo',
+  Sun: 'Sol',
+  Moon: 'Luna',
+  Flower2: 'Flor',
+  Fish: 'Pez',
+  Bird: 'Pájaro',
+  Apple: 'Manzana',
+  Camera: 'Cámara',
+  Gamepad2: 'Videojuegos',
 }
 
+// 24 colores con contraste ≥3:1 sobre texto blanco (2 por familia de tono).
 const AVATAR_COLORS = [
-  '#f87171',
-  '#fb923c',
-  '#facc15',
-  '#a3e635',
-  '#34d399',
-  '#2dd4bf',
-  '#22d3ee',
-  '#38bdf8',
-  '#818cf8',
-  '#a78bfa',
-  '#e879f9',
+  '#ef4444',
+  '#b91c1c',
+  '#c2410c',
+  '#78350f',
+  '#a16207',
+  '#713f12',
+  '#65a30d',
+  '#365314',
+  '#15803d',
+  '#14532d',
+  '#0f766e',
+  '#134e4a',
+  '#0891b2',
+  '#155e75',
+  '#3b82f6',
+  '#1e3a8a',
+  '#4f46e5',
+  '#4338ca',
+  '#8b5cf6',
+  '#4c1d95',
+  '#c026d3',
+  '#701a75',
   '#ec4899',
+  '#831843',
 ]
+
+/** Iconos visibles antes de expandir (2 filas de 5). */
+const VISIBLE_ICONS = 10
+/** Colores visibles antes de expandir (2 filas de 6). */
+const VISIBLE_COLORS = 12
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
@@ -104,6 +152,8 @@ export function ProfileSection({
   )
   const [msg, setMsg] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  const [iconsExpanded, setIconsExpanded] = useState(false)
+  const [colorsExpanded, setColorsExpanded] = useState(false)
 
   function openEditor() {
     setDraftName(name)
@@ -111,6 +161,8 @@ export function ProfileSection({
     if (c && /^#[0-9a-fA-F]{6}$/.test(c)) setColor(c)
     if (i && (PROFILE_ICONS as readonly string[]).includes(i)) setIcon(i)
     setMsg(null)
+    setIconsExpanded(false)
+    setColorsExpanded(false)
     setOpen(true)
   }
 
@@ -213,7 +265,10 @@ export function ProfileSection({
               </span>
             </div>
             <div className="grid grid-cols-5 justify-items-center gap-2.5">
-              {PROFILE_ICONS.map((key) => {
+              {(iconsExpanded
+                ? PROFILE_ICONS
+                : PROFILE_ICONS.slice(0, VISIBLE_ICONS)
+              ).map((key) => {
                 const Cmp =
                   key === 'initials' ? null : (ICON_COMPONENTS[key] ?? User)
                 const active = icon === key
@@ -241,6 +296,17 @@ export function ProfileSection({
                 )
               })}
             </div>
+            {PROFILE_ICONS.length > VISIBLE_ICONS && (
+              <button
+                type="button"
+                onClick={() => setIconsExpanded((v) => !v)}
+                aria-expanded={iconsExpanded}
+                className="flex w-full items-center justify-center gap-1.5 rounded-2xl border border-dashed border-(--border) px-4 py-2.5 text-sm font-semibold text-(--muted-foreground) transition active:scale-[.99]">
+                {iconsExpanded
+                  ? 'Ver menos'
+                  : `Ver más (${PROFILE_ICONS.length - VISIBLE_ICONS})`}
+              </button>
+            )}
 
             <hr className="border-(--border)/60" />
 
@@ -248,7 +314,10 @@ export function ProfileSection({
               <Label>Color</Label>
             </div>
             <div className="grid grid-cols-6 justify-items-center gap-2.5">
-              {AVATAR_COLORS.map((hex) => {
+              {(colorsExpanded
+                ? AVATAR_COLORS
+                : AVATAR_COLORS.slice(0, VISIBLE_COLORS)
+              ).map((hex) => {
                 const active = color.toLowerCase() === hex
                 return (
                   <button
@@ -269,6 +338,17 @@ export function ProfileSection({
                 )
               })}
             </div>
+            {AVATAR_COLORS.length > VISIBLE_COLORS && (
+              <button
+                type="button"
+                onClick={() => setColorsExpanded((v) => !v)}
+                aria-expanded={colorsExpanded}
+                className="flex w-full items-center justify-center gap-1.5 rounded-2xl border border-dashed border-(--border) px-4 py-2.5 text-sm font-semibold text-(--muted-foreground) transition active:scale-[.99]">
+                {colorsExpanded
+                  ? 'Ver menos'
+                  : `Ver más (${AVATAR_COLORS.length - VISIBLE_COLORS})`}
+              </button>
+            )}
           </div>
 
           {msg && (

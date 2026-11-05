@@ -1,13 +1,23 @@
 import {
+  Apple,
+  Bird,
+  Camera,
   Cat,
+  Crown,
   Dog,
+  Fish,
+  Flower2,
+  Gamepad2,
   Ghost,
   Heart,
+  Moon,
   Music,
   Rocket,
   Smile,
   Star,
+  Sun,
   User,
+  Zap,
 } from 'lucide-react'
 
 import { parseAvatar } from '@/lib/profile'
@@ -23,6 +33,16 @@ const ICONS: Record<string, typeof User> = {
   Ghost,
   Rocket,
   Music,
+  Crown,
+  Zap,
+  Sun,
+  Moon,
+  Flower2,
+  Fish,
+  Bird,
+  Apple,
+  Camera,
+  Gamepad2,
 }
 
 function initialsOf(name: string): string {

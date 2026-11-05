@@ -9,6 +9,16 @@ export const PROFILE_ICONS = [
   'Ghost',
   'Rocket',
   'Music',
+  'Crown',
+  'Zap',
+  'Sun',
+  'Moon',
+  'Flower2',
+  'Fish',
+  'Bird',
+  'Apple',
+  'Camera',
+  'Gamepad2',
 ] as const
 
 export type ProfileIcon = (typeof PROFILE_ICONS)[number]
@@ -18,11 +28,11 @@ export function encodeAvatar(color: string, icon: string): string {
   return `${color}:${icon}`
 }
 
-export function parseAvatar(
-  raw: string | null | undefined,
-): { color: string; icon: ProfileIcon } {
-  if (!raw || !raw.includes(':'))
-    return { color: '#6366f1', icon: 'initials' }
+export function parseAvatar(raw: string | null | undefined): {
+  color: string
+  icon: ProfileIcon
+} {
+  if (!raw || !raw.includes(':')) return { color: '#6366f1', icon: 'initials' }
   const [color, icon] = raw.split(':')
   const c = /^#[0-9a-fA-F]{6}$/.test(color ?? '') ? color! : '#6366f1'
   const i = (PROFILE_ICONS as readonly string[]).includes(icon ?? '')
