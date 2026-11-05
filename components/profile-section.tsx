@@ -84,32 +84,34 @@ const ICON_LABELS: Record<string, string> = {
   Gamepad2: 'Videojuegos',
 }
 
-// 24 colores con contraste ≥3:1 sobre texto blanco (2 por familia de tono).
+// 24 colores alegres (vivos) con buen contraste sobre texto blanco.
+// Orden arcoíris: primero los 12 vivos y luego los 12 oscuros, para que no
+// se vean repetidos. Verificado: 23/24 pasan ≥3:1; el dorado da 2.9.
 const AVATAR_COLORS = [
   '#ef4444',
-  '#b91c1c',
-  '#c2410c',
-  '#78350f',
-  '#a16207',
-  '#713f12',
+  '#ea580c',
+  '#d97706',
+  '#ca8a04',
   '#65a30d',
-  '#365314',
-  '#15803d',
-  '#14532d',
-  '#0f766e',
-  '#134e4a',
+  '#16a34a',
+  '#0d9488',
   '#0891b2',
-  '#155e75',
-  '#3b82f6',
-  '#1e3a8a',
-  '#4f46e5',
-  '#4338ca',
+  '#0284c7',
   '#8b5cf6',
-  '#4c1d95',
-  '#c026d3',
-  '#701a75',
+  '#d946ef',
   '#ec4899',
-  '#831843',
+  '#dc2626',
+  '#c2410c',
+  '#b45309',
+  '#a16207',
+  '#4d7c0f',
+  '#15803d',
+  '#0f766e',
+  '#0e7490',
+  '#2563eb',
+  '#7c3aed',
+  '#c026d3',
+  '#db2777',
 ]
 
 /** Iconos visibles antes de expandir (2 filas de 5). */
