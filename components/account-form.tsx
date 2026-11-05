@@ -1,11 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { CreditCard, Landmark, Star } from 'lucide-react'
+import { Check, CreditCard, Landmark, LayoutGrid, Star } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -63,8 +69,27 @@ export function AccountForm({
   )
   const [msg, setMsg] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   const Icon = type === 'DEBIT' ? Landmark : CreditCard
+
+  // El color elegido siempre va primero en el deslizable (igual que las
+  // categorías en el formulario de movimiento).
+  const sliderColors = useMemo(() => {
+    const i = ACCOUNT_COLORS.findIndex(
+      (h) => h.toLowerCase() === color.toLowerCase(),
+    )
+    if (i <= 0) return ACCOUNT_COLORS
+    return [
+      ACCOUNT_COLORS[i]!,
+      ...ACCOUNT_COLORS.slice(0, i),
+      ...ACCOUNT_COLORS.slice(i + 1),
+    ]
+  }, [color])
+  const sliderRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    sliderRef.current?.scrollTo({ left: 0, behavior: 'smooth' })
+  }, [color])
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -89,9 +114,9 @@ export function AccountForm({
   return (
     <form
       onSubmit={onSubmit}
-      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-6">
+      autoComplete="off"
+      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       {editing && <input type="hidden" name="id" value={account!.id} />}
-
       {/* Vista previa en vivo */}
       <div
         className="rounded-3xl p-4 text-white shadow-lg"
@@ -177,22 +202,33 @@ export function AccountForm({
 
       <div className="space-y-1.5">
         <Label>Color</Label>
-        <div className="grid grid-cols-8 gap-2">
-          {ACCOUNT_COLORS.map((hex) => (
-            <button
-              key={hex}
-              type="button"
-              onClick={() => setColor(hex)}
-              aria-label={`Color ${hex}`}
-              className={cn(
-                'flex size-8 items-center justify-center rounded-full border-2 ring-1 ring-black/10 transition ring-inset active:scale-95',
-                color.toLowerCase() === hex
-                  ? 'border-(--foreground)'
-                  : 'border-transparent',
-              )}
-              style={{ backgroundColor: hex }}
-            />
-          ))}
+        <div className="flex items-center gap-2">
+          <div
+            ref={sliderRef}
+            className="no-scrollbar flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-0.5">
+            {sliderColors.map((hex) => (
+              <button
+                key={hex}
+                type="button"
+                onClick={() => setColor(hex)}
+                aria-label={`Color ${hex}`}
+                className={cn(
+                  'flex size-8 shrink-0 items-center justify-center rounded-full border-2 ring-1 ring-black/10 transition ring-inset active:scale-95',
+                  color.toLowerCase() === hex
+                    ? 'border-(--foreground)'
+                    : 'border-transparent',
+                )}
+                style={{ backgroundColor: hex }}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            aria-label="Ver todos los colores"
+            onClick={() => setPaletteOpen(true)}
+            className="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-(--border) bg-(--muted)/60 transition active:scale-95">
+            <LayoutGrid className="size-4" />
+          </button>
         </div>
         <input type="hidden" name="color" value={color} />
       </div>
@@ -298,13 +334,12 @@ export function AccountForm({
           </div>
         </>
       )}
-
       {msg && (
         <p className="text-center text-sm font-medium text-red-500">{msg}</p>
       )}
       <Button
         type="submit"
-        className="h-12 w-full rounded-2xl text-base"
+        className="h-12 w-full shrink-0 rounded-2xl text-base"
         disabled={pending}>
         {pending
           ? 'Guardando…'
@@ -312,6 +347,38 @@ export function AccountForm({
             ? 'Guardar cambios'
             : 'Agregar cuenta'}
       </Button>
+
+      {/* Paleta completa de colores */}
+      <Dialog open={paletteOpen} onOpenChange={setPaletteOpen}>
+        <DialogContent className="max-h-[86dvh]">
+          <DialogHeader>
+            <DialogTitle>Color de la cuenta</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-8 gap-2 pb-2">
+            {ACCOUNT_COLORS.map((hex) => (
+              <button
+                key={hex}
+                type="button"
+                onClick={() => {
+                  setColor(hex)
+                  setPaletteOpen(false)
+                }}
+                aria-label={`Color ${hex}`}
+                className={cn(
+                  'flex size-8 items-center justify-center rounded-full border-2 ring-1 ring-black/10 transition ring-inset active:scale-95',
+                  color.toLowerCase() === hex
+                    ? 'border-(--foreground)'
+                    : 'border-transparent',
+                )}
+                style={{ backgroundColor: hex }}>
+                {color.toLowerCase() === hex && (
+                  <Check className="size-4 text-white" />
+                )}
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </form>
   )
 }

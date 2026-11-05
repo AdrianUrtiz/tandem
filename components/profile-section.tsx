@@ -24,10 +24,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-import { ACCOUNT_COLORS } from '@/lib/categories'
+import { syncForce } from '@/lib/offline/useSnapshotSync'
 import { PROFILE_ICONS } from '@/lib/profile'
 import { updateProfile } from '@/lib/profile-actions'
-import { syncForce } from '@/lib/offline/useSnapshotSync'
 import { cn } from '@/lib/utils'
 
 const ICON_COMPONENTS: Record<string, typeof User> = {
@@ -55,7 +54,20 @@ const ICON_LABELS: Record<string, string> = {
   Music: 'Música',
 }
 
-const AVATAR_COLORS = ACCOUNT_COLORS.slice(0, 12)
+const AVATAR_COLORS = [
+  '#f87171',
+  '#fb923c',
+  '#facc15',
+  '#a3e635',
+  '#34d399',
+  '#2dd4bf',
+  '#22d3ee',
+  '#38bdf8',
+  '#818cf8',
+  '#a78bfa',
+  '#e879f9',
+  '#ec4899',
+]
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
