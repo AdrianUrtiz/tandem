@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -20,6 +21,7 @@ import {
 import { toast } from 'sonner'
 
 import { AccountIcon } from '@/components/account-icon'
+import { NewCategoryFields } from '@/components/new-category-fields'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -33,17 +35,10 @@ import { Switch } from '@/components/ui/switch'
 
 import { createTransaction, updateTransaction } from '@/lib/actions'
 import type { CatalogRow } from '@/lib/catalog'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { lookupCategory, prettyCat } from '@/lib/categories'
 import type { CompanionRow } from '@/lib/companions'
-import {
-  CATEGORY_COLORS,
-  ICONS,
-  ICON_PRESETS,
-  lookupCategory,
-  prettyCat,
-} from '@/lib/categories'
-import { createCategory } from '@/lib/category-actions'
 import { fromCents, normalizeMoney, toCents, toFixedCents } from '@/lib/money'
+import { db } from '@/lib/offline/db'
 import {
   type EnqueueInput,
   enqueueOfflineCreate,
@@ -51,15 +46,14 @@ import {
   validateOfflineCreate,
 } from '@/lib/offline/outbox'
 import { isPendingId } from '@/lib/offline/pending'
-import { db } from '@/lib/offline/db'
-import {
-  joinConcept,
-  PLACE_MAX_LEN,
-  splitConcept,
-  type PlaceRow,
-} from '@/lib/place-format'
 import { useOnlineStatus } from '@/lib/offline/useOnlineStatus'
 import { syncForce } from '@/lib/offline/useSnapshotSync'
+import {
+  PLACE_MAX_LEN,
+  type PlaceRow,
+  joinConcept,
+  splitConcept,
+} from '@/lib/place-format'
 import { cn, formatMoney } from '@/lib/utils'
 import {
   addWallDays,
@@ -96,7 +90,11 @@ export type TxEditData = {
   shareFixed?: boolean
   shareExternalName?: string | null
   /** Gasto en grupo (v1): N partes explícitas. Monto total por integrante. */
-  shares?: { debtorId?: string | null; externalName?: string | null; amount: number }[]
+  shares?: {
+    debtorId?: string | null
+    externalName?: string | null
+    amount: number
+  }[]
   /** Nombres de todos los integrantes (pareja + externos). */
   shareNames?: string[]
   /** Gasto de grupo: su reparto no se edita desde aquí. */
@@ -113,7 +111,15 @@ const MSI_OPTS = [1, 3, 6, 9, 12, 15, 24]
 const msiLabel = (m: number) => (m === 1 ? 'Contado' : `${m} MSI`)
 
 type Panel =
-  null | 'cats' | 'account' | 'dest' | 'date' | 'addcat' | 'msi' | 'share' | 'desc'
+  | null
+  | 'cats'
+  | 'account'
+  | 'dest'
+  | 'date'
+  | 'addcat'
+  | 'msi'
+  | 'share'
+  | 'desc'
 
 /** "hoy" o "12 oct" para la fila de sugerencia de amigo. */
 function lastCompanionUse(iso: string): string {
@@ -128,7 +134,8 @@ function lastCompanionUse(iso: string): string {
   return d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })
 }
 
-function shortDate(ymd: string) {  // Hora-muro (ver lib/walltime.ts): el día se interpreta en UTC para que
+function shortDate(ymd: string) {
+  // Hora-muro (ver lib/walltime.ts): el día se interpreta en UTC para que
   // no se desfase según el runtime.
   const [y, m, d] = ymd.split('-').map(Number)
   return fmtDayMonth(utc(y, (m || 1) - 1, d || 1))
@@ -216,9 +223,7 @@ export function TransactionForm({
   const isGroupEdit = (editShares?.length ?? 0) > 1
   const [shared, setShared] = useState(Boolean(editShare))
   const [shareTab, setShareTab] = useState<'pareja' | 'otros'>(
-    isGroupEdit || (editShare && entry!.shareExternalName)
-      ? 'otros'
-      : 'pareja',
+    isGroupEdit || (editShare && entry!.shareExternalName) ? 'otros' : 'pareja',
   )
   // — % o monto fijo (Tab Pareja y Tab Otros con 1 integrante) —
   const [shareMode, setShareMode] = useState<'pct' | 'amount'>(
@@ -302,9 +307,7 @@ export function TransactionForm({
   function addMember(raw: string): boolean {
     const clean = raw.trim().replace(/\s+/g, ' ')
     if (clean.length < 1 || clean.length > 30) return false
-    if (
-      memberNames.some((x) => x.toLowerCase() === clean.toLowerCase())
-    )
+    if (memberNames.some((x) => x.toLowerCase() === clean.toLowerCase()))
       return false
     if (memberNames.length + (includePartner ? 1 : 0) >= 10) return false
     setMemberNames((prev) => [...prev, clean])
@@ -321,12 +324,8 @@ export function TransactionForm({
     return () => window.clearTimeout(t)
   }, [panel])
   const [localRows, setLocalRows] = useState<CatalogRow[]>([])
-  const [newCatName, setNewCatName] = useState('')
-  const [newCatIcon, setNewCatIcon] = useState<string>(ICON_PRESETS[0])
-  const [newCatColor, setNewCatColor] = useState<string>('#fb923c')
   const [msg, setMsg] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
-  const [savingCat, setSavingCat] = useState(false)
   const online = useOnlineStatus()
   // Nombre e id de la pareja (desde la copia local) para el panel Compartir.
   // También al editar: hace falta el id para reescribir el share de pareja.
@@ -365,9 +364,9 @@ export function TransactionForm({
     () => db.companions.orderBy('lastUsedAt').reverse().toArray(),
     [],
   )
-  const [remoteCompanions, setRemoteCompanions] = useState<CompanionRow[] | null>(
-    null,
-  )
+  const [remoteCompanions, setRemoteCompanions] = useState<
+    CompanionRow[] | null
+  >(null)
   useEffect(() => {
     if (
       !online ||
@@ -390,17 +389,13 @@ export function TransactionForm({
   }, [online, localCompanions, remoteCompanions])
   const companions = useMemo(
     () =>
-      localCompanions?.length
-        ? localCompanions
-        : (remoteCompanions ?? []),
+      localCompanions?.length ? localCompanions : (remoteCompanions ?? []),
     [localCompanions, remoteCompanions],
   )
   // Sugerencias de amigos: recientes primero, filtran mientras se escribe
   // (excluye el texto exacto ya escrito y los ya agregados).
   const memberQ = memberDraft.trim().toLowerCase()
-  const memberExists = companions.some(
-    (c) => c.name.toLowerCase() === memberQ,
-  )
+  const memberExists = companions.some((c) => c.name.toLowerCase() === memberQ)
   const memberSuggestions = useMemo(() => {
     const added = new Set(memberNames.map((n) => n.toLowerCase()))
     return companions
@@ -666,9 +661,9 @@ export function TransactionForm({
   }
 
   // Selector % / monto fijo para 1 contraparte (Tab Pareja con tu pareja,
-// Tab Otros con su único integrante). Usa el estado compartido
-// shareMode/sharePct/shareAmt y singleName según la tab activa.
-function renderSinglePanels() {
+  // Tab Otros con su único integrante). Usa el estado compartido
+  // shareMode/sharePct/shareAmt y singleName según la tab activa.
+  function renderSinglePanels() {
     return (
       <>
         <div>
@@ -803,9 +798,15 @@ function renderSinglePanels() {
     const shareEditable = mode === 'cargo' && !(editing && entry?.isGroup)
     // Solo tab Otros con 2+: la tab Pareja y Otros-con-1 usan legado.
     const otrosMulti =
-      shareEditable && mode === 'cargo' && shared && shareTab === 'otros' && debtorCount > 1
+      shareEditable &&
+      mode === 'cargo' &&
+      shared &&
+      shareTab === 'otros' &&
+      debtorCount > 1
     // Construye las partes (iguales o importes) antes de validar red.
-    let multiParts: { debtorId?: string; externalName?: string; amount: number }[] | null = null
+    let multiParts:
+      { debtorId?: string; externalName?: string; amount: number }[] | null =
+      null
     if (otrosMulti) {
       if (splitMode === 'equal') {
         if (!(totalC > 0)) {
@@ -1003,53 +1004,32 @@ function renderSinglePanels() {
     }
   }
 
-  async function saveCustomCat() {
-    if (!online) {
-      setMsg('Conéctate para crear categorías')
-      return
-    }
-    if (newCatName.trim().length < 2) {
-      setMsg('La categoría necesita al menos 2 letras')
-      return
-    }
-    setSavingCat(true)
-    const fd = new FormData()
-    fd.set('name', newCatName.trim())
-    fd.set('iconName', newCatIcon)
-    fd.set('color', newCatColor)
-    fd.set('kind', mode === 'abono' ? 'income' : 'expense')
-    const res = await createCategory(fd)
-    setSavingCat(false)
-    if ('error' in res && res.error) {
-      setMsg(res.error)
-      return
-    }
-    if ('category' in res && res.category) {
-      const c = res.category
-      setLocalRows((prev) =>
-        prev.some((x) => x.code === c.code)
-          ? prev
-          : [
-              ...prev,
-              {
-                id: c.id,
-                code: c.code,
-                name: c.name,
-                iconName: c.iconName,
-                color: c.color,
-                kind: c.kind as 'expense' | 'income' | 'both',
-                isDefault: false,
-                mine: true,
-              },
-            ],
-      )
-      setCategory(c.code)
-      toast.success('Categoría creada')
-      void syncForce()
-    }
-    setNewCatName('')
-    setPanel('cats')
-    setMsg(null)
+  async function appendCreatedCat(c: {
+    id: string
+    code: string
+    name: string
+    iconName: string
+    color: string
+    kind: string
+  }) {
+    setLocalRows((prev) =>
+      prev.some((x) => x.code === c.code)
+        ? prev
+        : [
+            ...prev,
+            {
+              id: c.id,
+              code: c.code,
+              name: c.name,
+              iconName: c.iconName,
+              color: c.color,
+              kind: c.kind as 'expense' | 'income' | 'both',
+              isDefault: false,
+              mine: true,
+            },
+          ],
+    )
+    setCategory(c.code)
   }
 
   const pagoBlocked =
@@ -1115,31 +1095,31 @@ function renderSinglePanels() {
           </Button>
         </div>
       ) : (
-      <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 pb-1">
-        <button
-          type="button"
-          onClick={() => setPanel('date')}
-          className="flex shrink-0 items-center gap-1.5 rounded-full border border-(--border) bg-(--muted)/60 px-4 py-2 text-xs font-semibold">
-          <CalendarDays className="size-3.5" /> {dateLabel}
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            mode === 'cargo' ? setPanel('desc') : setEditingDesc(true)
-          }
-          className={cn(
-            'flex max-w-[180px] shrink-0 items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold',
-            desc || place
-              ? 'border-transparent bg-(--foreground) text-(--background)'
-              : 'border-(--border) bg-(--muted)/60',
-          )}>
-          <NotebookPen className="size-3.5" />
-          <span className="truncate">
-            {desc || place
-              ? [desc, place].filter(Boolean).join(' · ')
-              : 'Descripción'}
-          </span>
-        </button>
+        <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 pb-1">
+          <button
+            type="button"
+            onClick={() => setPanel('date')}
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-(--border) bg-(--muted)/60 px-4 py-2 text-xs font-semibold">
+            <CalendarDays className="size-3.5" /> {dateLabel}
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              mode === 'cargo' ? setPanel('desc') : setEditingDesc(true)
+            }
+            className={cn(
+              'flex max-w-[180px] shrink-0 items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold',
+              desc || place
+                ? 'border-transparent bg-(--foreground) text-(--background)'
+                : 'border-(--border) bg-(--muted)/60',
+            )}>
+            <NotebookPen className="size-3.5" />
+            <span className="truncate">
+              {desc || place
+                ? [desc, place].filter(Boolean).join(' · ')
+                : 'Descripción'}
+            </span>
+          </button>
           {mode === 'pago' ? (
             <>
               <button
@@ -1193,7 +1173,7 @@ function renderSinglePanels() {
               )}
             </>
           )}
-      </div>
+        </div>
       )}
 
       {/* Categorías: slider ~85% + botón fijo al grid */}
@@ -1315,61 +1295,13 @@ function renderSinglePanels() {
           <DialogHeader>
             <DialogTitle>Nueva categoría</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              {ICON_PRESETS.map((name) => {
-                const Icon = ICONS[name] ?? ICONS.Shapes
-                return (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => setNewCatIcon(name)}
-                    aria-label={name}
-                    className={cn(
-                      'flex size-11 items-center justify-center rounded-2xl border',
-                      newCatIcon === name
-                        ? 'border-(--primary) bg-(--primary)/10'
-                        : 'border-(--border)',
-                    )}>
-                    <Icon className="size-5" style={{ color: newCatColor }} />
-                  </button>
-                )
-              })}
-            </div>
-            <div className="grid grid-cols-8 gap-2">
-              {CATEGORY_COLORS.map((hex) => (
-                <button
-                  key={hex}
-                  type="button"
-                  onClick={() => setNewCatColor(hex)}
-                  aria-label={`Color ${hex}`}
-                  className={cn(
-                    'flex size-8 items-center justify-center rounded-full border-2 ring-1 ring-black/10 ring-inset',
-                    newCatColor === hex
-                      ? 'border-(--foreground)'
-                      : 'border-transparent',
-                  )}
-                  style={{ backgroundColor: hex }}>
-                  {newCatColor === hex && (
-                    <Check className="size-4 text-white" />
-                  )}
-                </button>
-              ))}
-            </div>
-            <Input
-              value={newCatName}
-              onChange={(e) => setNewCatName(e.target.value)}
-              placeholder="Nombre (ej. Videojuegos)"
-              maxLength={30}
-            />
-            <Button
-              type="button"
-              className="w-full"
-              onClick={saveCustomCat}
-              disabled={savingCat}>
-              {savingCat ? 'Creando…' : 'Crear categoría'}
-            </Button>
-          </div>
+          <NewCategoryFields
+            kind={mode === 'abono' ? 'income' : 'expense'}
+            onCreated={(c) => {
+              appendCreatedCat(c)
+              setPanel('cats')
+            }}
+          />
         </DialogContent>
       </Dialog>
 
@@ -1622,8 +1554,7 @@ function renderSinglePanels() {
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault()
-                          if (addMember(memberDraft))
-                            memberRef.current?.focus()
+                          if (addMember(memberDraft)) memberRef.current?.focus()
                         }
                       }}
                       placeholder="Buscar o escribir un nombre…"
@@ -1648,7 +1579,10 @@ function renderSinglePanels() {
                     aria-label="Amigos guardados"
                     className="max-h-56 space-y-1 overflow-y-auto">
                     {memberSuggestions.map((c) => (
-                      <li key={c.name.toLowerCase()} role="option" aria-selected={false}>
+                      <li
+                        key={c.name.toLowerCase()}
+                        role="option"
+                        aria-selected={false}>
                         <button
                           type="button"
                           onClick={() => {
@@ -1913,7 +1847,8 @@ function renderSinglePanels() {
                   })}
                 </ul>
               ) : (
-                placeQ && !placeExists && (
+                placeQ &&
+                !placeExists && (
                   <p className="text-center text-xs text-(--muted-foreground)">
                     Se guardará «{place.trim()}» como nuevo lugar.
                   </p>
@@ -2009,9 +1944,10 @@ function ModeDropdown({
       document.removeEventListener('pointerdown', onDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open ])
+  }, [open])
 
-  const label = mode === 'cargo' ? 'Gasto' : mode === 'abono' ? 'Ingreso' : 'Pago'
+  const label =
+    mode === 'cargo' ? 'Gasto' : mode === 'abono' ? 'Ingreso' : 'Pago'
 
   return (
     <div ref={ref} className="relative">

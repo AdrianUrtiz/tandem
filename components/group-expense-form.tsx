@@ -8,6 +8,7 @@ import {
   CalendarDays,
   Check,
   NotebookPen,
+  Plus,
   Scale,
   Shapes,
   User,
@@ -18,6 +19,7 @@ import { toast } from 'sonner'
 
 import { AccountIcon } from '@/components/account-icon'
 import { BottomSheet } from '@/components/bottom-sheet'
+import { NewCategoryFields } from '@/components/new-category-fields'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -136,6 +138,8 @@ export function GroupExpenseForm({
   const [concept, setConcept] = useState(entry?.concept ?? '')
   const [editingConcept, setEditingConcept] = useState(false)
   const [category, setCategory] = useState(entry?.category ?? 'COMIDA')
+  const [localRows, setLocalRows] = useState<CatalogRow[]>([])
+  const [addingCat, setAddingCat] = useState(false)
   const [dateYMD, setDateYMD] = useState(
     entry ? ymdOfWall(new Date(entry.date)) : todayMexicoYMD(),
   )
@@ -153,15 +157,12 @@ export function GroupExpenseForm({
   }
   const [payerId, setPayerId] = useState(
     () =>
-      entry?.payerSeatId ??
-      seats.find((s) => s.isMe)?.id ??
-      seats[0]?.id ??
-      '',
+      entry?.payerSeatId ?? seats.find((s) => s.isMe)?.id ?? seats[0]?.id ?? '',
   )
   const [accountId, setAccountId] = useState(accountOptions[0]?.id ?? '')
   // Meses sin intereses (solo al crear; al editar quedan fijos, igual que
   // en movimientos personales: las parcialidades ya registradas no se mueven).
-  const [msi, setMsi] = useState(editing ? (entry!.installments || 1) : 1)
+  const [msi, setMsi] = useState(editing ? entry!.installments || 1 : 1)
   const [splitMode, setSplitMode] = useState<'equal' | 'custom'>(entryMode)
   const [picked, setPicked] = useState<string[]>(() =>
     editing
@@ -230,7 +231,12 @@ export function GroupExpenseForm({
         : dateYMD.slice(8, 10) + '/' + dateYMD.slice(5, 7)
   const accountLabel =
     accountOptions.find((a) => a.id === accountId)?.name ?? 'Cuenta'
-  const catRow = cats.find((c) => c.code === category)
+  // Catálogo de gasto (tabla + creadas en sesión).
+  const allCats = useMemo(() => {
+    const seen = new Set(cats.map((c) => c.code))
+    return [...cats, ...localRows.filter((r) => !seen.has(r.code))]
+  }, [cats, localRows])
+  const catRow = allCats.find((c) => c.code === category)
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault()
@@ -612,7 +618,11 @@ export function GroupExpenseForm({
         disabled={pending}
         onClick={() => void submit()}
         className="mt-3 h-12 w-full text-base">
-        {pending ? 'Guardando…' : editing ? 'Guardar cambios' : 'Registrar gasto'}
+        {pending
+          ? 'Guardando…'
+          : editing
+            ? 'Guardar cambios'
+            : 'Registrar gasto'}
       </Button>
 
       {/* Sheet: fecha */}
@@ -762,13 +772,18 @@ export function GroupExpenseForm({
       {/* Diálogo: categoría */}
       <Dialog
         open={sheet === 'cats'}
-        onOpenChange={(o) => !o && setSheet(null)}>
+        onOpenChange={(o) => {
+          if (!o) {
+            setSheet(null)
+            setAddingCat(false)
+          }
+        }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Categoría</DialogTitle>
           </DialogHeader>
           <ul className="max-h-72 space-y-1 overflow-y-auto">
-            {cats
+            {allCats
               .filter((c) => c.kind === 'expense' || c.kind === 'both')
               .map((c) => {
                 const active = category === c.code
@@ -801,6 +816,42 @@ export function GroupExpenseForm({
                 )
               })}
           </ul>
+          <button
+            type="button"
+            onClick={() => setAddingCat((v) => !v)}
+            aria-expanded={addingCat}
+            className="flex w-full items-center justify-center gap-1.5 rounded-2xl border border-dashed border-(--border) px-4 py-2.5 text-sm font-semibold text-(--muted-foreground) transition active:scale-[.99]">
+            <Plus className="size-4" />
+            {addingCat ? 'Cerrar' : 'Nueva categoría'}
+          </button>
+          {addingCat && (
+            <div className="rounded-3xl border border-(--border) p-3">
+              <NewCategoryFields
+                kind="expense"
+                onCreated={(c) => {
+                  setLocalRows((prev) =>
+                    prev.some((x) => x.code === c.code)
+                      ? prev
+                      : [
+                          ...prev,
+                          {
+                            id: c.id,
+                            code: c.code,
+                            name: c.name,
+                            iconName: c.iconName,
+                            color: c.color,
+                            kind: c.kind as CatalogRow['kind'],
+                            isDefault: false,
+                            mine: true,
+                          },
+                        ],
+                  )
+                  setCategory(c.code)
+                  setAddingCat(false)
+                }}
+              />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

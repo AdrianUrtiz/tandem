@@ -6,6 +6,7 @@ import { Check, LayoutGrid, Plus, Repeat, Users, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AccountIcon } from '@/components/account-icon'
+import { NewCategoryFields } from '@/components/new-category-fields'
 import type { AccountOpt } from '@/components/transaction-form'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,13 +20,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 
 import type { CatalogRow } from '@/lib/catalog'
-import {
-  CATEGORY_COLORS,
-  ICONS,
-  ICON_PRESETS,
-  lookupCategory,
-} from '@/lib/categories'
-import { createCategory } from '@/lib/category-actions'
+import { lookupCategory } from '@/lib/categories'
 import { fromCents, normalizeMoney, toCents } from '@/lib/money'
 import { resolvePartner } from '@/lib/offline/outbox'
 import { syncForce } from '@/lib/offline/useSnapshotSync'
@@ -115,11 +110,7 @@ export function SubscriptionForm({
   const [msg, setMsg] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [localRows, setLocalRows] = useState<CatalogRow[]>([])
-  const [addingCat, setAddingCat] = useState(false)
-  const [newCatName, setNewCatName] = useState('')
-  const [newCatIcon, setNewCatIcon] = useState<string>(ICON_PRESETS[0])
-  const [newCatColor, setNewCatColor] = useState<string>('#fb923c')
-  const [savingCat, setSavingCat] = useState(false)
+  const [newCatOpen, setNewCatOpen] = useState(false)
 
   const totalC = toCents(amount || '0')
   const totalNum = fromCents(totalC)
@@ -159,50 +150,6 @@ export function SubscriptionForm({
         ]
       : expenseCats
 
-  async function saveCustomCat() {
-    if (newCatName.trim().length < 2) {
-      setMsg('La categoría necesita al menos 2 letras')
-      return
-    }
-    setSavingCat(true)
-    const fd = new FormData()
-    fd.set('name', newCatName.trim())
-    fd.set('iconName', newCatIcon)
-    fd.set('color', newCatColor)
-    fd.set('kind', 'expense')
-    const res = await createCategory(fd)
-    setSavingCat(false)
-    if ('error' in res && res.error) {
-      setMsg(res.error)
-      return
-    }
-    if ('category' in res && res.category) {
-      const c = res.category
-      setLocalRows((prev) =>
-        prev.some((x) => x.code === c.code)
-          ? prev
-          : [
-              ...prev,
-              {
-                id: c.id,
-                code: c.code,
-                name: c.name,
-                iconName: c.iconName,
-                color: c.color,
-                kind: c.kind as 'expense' | 'income' | 'both',
-                isDefault: false,
-                mine: true,
-              },
-            ],
-      )
-      setCategory(c.code)
-    }
-    setNewCatName('')
-    setAddingCat(false)
-    setMsg(null)
-    toast.success('Categoría creada')
-    void syncForce()
-  }
   const sliderRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     sliderRef.current?.scrollTo({ left: 0, behavior: 'smooth' })
@@ -447,68 +394,55 @@ export function SubscriptionForm({
             ))}
             <button
               type="button"
-              onClick={() => setAddingCat((v) => !v)}
+              onClick={() => {
+                setGridOpen(false)
+                setNewCatOpen(true)
+              }}
               className="flex flex-col items-center justify-center gap-1.5 rounded-3xl border border-dashed border-(--border) p-3 text-(--muted-foreground) transition active:scale-95">
               <Plus className="size-6" />
               <span className="text-[11px] font-medium">Nueva</span>
             </button>
           </div>
-          {addingCat && (
-            <div className="space-y-3 rounded-3xl border border-(--border) p-3">
-              <div className="flex flex-wrap gap-2">
-                {ICON_PRESETS.map((iconName) => {
-                  const Icon = ICONS[iconName] ?? ICONS.Shapes
-                  return (
-                    <button
-                      key={iconName}
-                      type="button"
-                      onClick={() => setNewCatIcon(iconName)}
-                      aria-label={iconName}
-                      className={cn(
-                        'flex size-10 items-center justify-center rounded-2xl border',
-                        newCatIcon === iconName
-                          ? 'border-(--primary) bg-(--primary)/10'
-                          : 'border-(--border)',
-                      )}>
-                      <Icon className="size-5" style={{ color: newCatColor }} />
-                    </button>
-                  )
-                })}
-              </div>
-              <div className="grid grid-cols-8 gap-2">
-                {CATEGORY_COLORS.map((hex) => (
-                  <button
-                    key={hex}
-                    type="button"
-                    onClick={() => setNewCatColor(hex)}
-                    aria-label={`Color ${hex}`}
-                    className={cn(
-                      'flex size-8 items-center justify-center rounded-full border-2 ring-1 ring-black/10 ring-inset',
-                      newCatColor === hex
-                        ? 'border-(--foreground)'
-                        : 'border-transparent',
-                    )}
-                    style={{ backgroundColor: hex }}
-                  />
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  value={newCatName}
-                  onChange={(e) => setNewCatName(e.target.value)}
-                  placeholder="Nombre (ej. Gimnasio)"
-                  maxLength={30}
-                  className="h-11"
-                />
-                <Button
-                  type="button"
-                  onClick={saveCustomCat}
-                  disabled={savingCat}>
-                  {savingCat ? 'Creando…' : 'Crear'}
-                </Button>
-              </div>
-            </div>
-          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={newCatOpen}
+        onOpenChange={(o) => {
+          if (!o) {
+            setNewCatOpen(false)
+            setGridOpen(true)
+          }
+        }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nueva categoría</DialogTitle>
+          </DialogHeader>
+          <NewCategoryFields
+            kind="expense"
+            onCreated={(c) => {
+              setLocalRows((prev) =>
+                prev.some((x) => x.code === c.code)
+                  ? prev
+                  : [
+                      ...prev,
+                      {
+                        id: c.id,
+                        code: c.code,
+                        name: c.name,
+                        iconName: c.iconName,
+                        color: c.color,
+                        kind: c.kind as 'expense' | 'income' | 'both',
+                        isDefault: false,
+                        mine: true,
+                      },
+                    ],
+              )
+              setCategory(c.code)
+              setNewCatOpen(false)
+              setGridOpen(true)
+            }}
+          />
         </DialogContent>
       </Dialog>
 
