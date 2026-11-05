@@ -129,7 +129,7 @@ export function CategoryForm({
 
       <div className="space-y-1.5">
         <Label>Icono</Label>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="grid grid-cols-6 gap-2">
           {ICON_PRESETS.map((n) => {
             const Icon = ICONS[n] ?? ICONS.Shapes
             return (
@@ -139,7 +139,7 @@ export function CategoryForm({
                 onClick={() => setIconName(n)}
                 aria-label={n}
                 className={cn(
-                  'flex size-11 items-center justify-center rounded-2xl border transition active:scale-95',
+                  'flex size-12 items-center justify-center rounded-2xl border transition active:scale-95',
                   iconName === n
                     ? 'border-(--primary) bg-(--primary)/10'
                     : 'border-(--border)',
