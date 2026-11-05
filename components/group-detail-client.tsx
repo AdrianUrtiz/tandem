@@ -22,6 +22,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
 import { BottomSheet } from '@/components/bottom-sheet'
+import { useBottomNavHidden } from '@/components/use-bottom-nav-hidden'
 import { AccountIcon } from '@/components/account-icon'
 import {
   type GroupAccountOpt,
@@ -96,6 +97,7 @@ export function GroupDetailClient({  detail,
   cats: CatalogRow[]
 }) {
   const router = useRouter()
+  const navHidden = useBottomNavHidden()
   const [expenseOpen, setExpenseOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [claimId, setClaimId] = useState<string | null>(null)
@@ -868,7 +870,10 @@ export function GroupDetailClient({  detail,
           type="button"
           onClick={() => setExpenseOpen(true)}
           aria-label="Agregar gasto grupal"
-          className="fixed right-5 bottom-20 z-40 flex size-14 items-center justify-center rounded-full bg-(--primary) text-(--primary-foreground) shadow-2xl transition active:scale-95">
+          className={cn(
+            'fixed right-5 z-40 flex size-14 items-center justify-center rounded-full bg-(--primary) text-(--primary-foreground) shadow-2xl transition-all duration-300 active:scale-95',
+            navHidden ? 'bottom-6' : 'bottom-20',
+          )}>
           <Plus className="size-7" />
         </button>
       )}

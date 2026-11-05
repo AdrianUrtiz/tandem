@@ -5,11 +5,13 @@ import { useEffect, useState } from 'react'
 import { ArrowUp } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 
+import { useBottomNavHidden } from '@/components/use-bottom-nav-hidden'
 import { cn } from '@/lib/utils'
 
 /** Botón para volver arriba: aparece sobre el FAB al desplazar hacia abajo. */
 export function ScrollTopButton() {
   const pathname = usePathname()
+  const navHidden = useBottomNavHidden()
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
@@ -49,7 +51,13 @@ export function ScrollTopButton() {
       tabIndex={visible ? 0 : -1}
       className={cn(
         'fixed z-40 flex size-10 items-center justify-center rounded-full border border-(--border) bg-(--card)/95 text-(--foreground) shadow-xl backdrop-blur transition-all duration-300 active:scale-95',
-        atFabSpot ? 'right-5 bottom-20' : 'right-7 bottom-37',
+        atFabSpot
+          ? navHidden
+            ? 'right-5 bottom-6'
+            : 'right-5 bottom-20'
+          : navHidden
+            ? 'right-7 bottom-23'
+            : 'right-7 bottom-37',
         visible
           ? 'translate-y-0 opacity-100'
           : 'pointer-events-none translate-y-2 opacity-0',

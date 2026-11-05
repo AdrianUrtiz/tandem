@@ -1,11 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-
 import { LayoutList, PieChart, User, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
+import { useBottomNavHidden } from '@/components/use-bottom-nav-hidden'
 import { cn } from '@/lib/utils'
 
 const ITEMS = [
@@ -17,28 +16,7 @@ const ITEMS = [
 
 export function BottomNav() {
   const pathname = usePathname()
-  const [hidden, setHidden] = useState(false)
-
-  // Se oculta al desplazar hacia abajo y reaparece al subir.
-  useEffect(() => {
-    let lastY = window.scrollY
-    let ticking = false
-    const onScroll = () => {
-      if (ticking) return
-      ticking = true
-      requestAnimationFrame(() => {
-        const y = window.scrollY
-        const dy = y - lastY
-        if (y <= 80) setHidden(false)
-        else if (dy > 6) setHidden(true)
-        else if (dy < -6) setHidden(false)
-        lastY = y
-        ticking = false
-      })
-    }
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
+  const hidden = useBottomNavHidden()
 
   return (
     <nav

@@ -10,7 +10,8 @@ import { AccountForm } from '@/components/account-form'
 import { BottomSheet } from '@/components/bottom-sheet'
 import { GroupCreateSheet, GroupJoinSheet } from '@/components/group-sheets'
 import { SubscriptionForm } from '@/components/subscription-form'
-import { type AccountOpt, TransactionForm } from '@/components/transaction-form'
+import { TransactionForm, type AccountOpt } from '@/components/transaction-form'
+import { useBottomNavHidden } from '@/components/use-bottom-nav-hidden'
 
 import { byAccountOrder, toAccountOpt } from '@/lib/accounts'
 import type { CatalogRow } from '@/lib/catalog'
@@ -19,7 +20,7 @@ import { toCatalog } from '@/lib/offline/derive-activity'
 import { cn } from '@/lib/utils'
 
 const FAB_CLS =
-  'fixed right-5 bottom-20 z-40 flex size-14 items-center justify-center rounded-full bg-(--primary) text-(--primary-foreground) shadow-2xl transition active:scale-95'
+  'fixed right-5 z-40 flex size-14 items-center justify-center rounded-full bg-(--primary) text-(--primary-foreground) shadow-2xl transition-all duration-300 active:scale-95'
 
 type FabProps = {
   accountOptions: AccountOpt[]
@@ -59,6 +60,7 @@ export function Fab({ accountOptions, cats, userName }: FabProps) {
 
 function CuentasSpeedDial({ accountOptions, cats, userName }: FabProps) {
   const [expanded, setExpanded] = useState(false)
+  const navHidden = useBottomNavHidden()
   const [accountOpen, setAccountOpen] = useState(false)
   const [subOpen, setSubOpen] = useState(false)
   const [groupCreateOpen, setGroupCreateOpen] = useState(false)
@@ -82,7 +84,11 @@ function CuentasSpeedDial({ accountOptions, cats, userName }: FabProps) {
           expanded ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
       />
-      <div className="pointer-events-none fixed right-5 bottom-20 z-50 flex flex-col items-end gap-3">
+      <div
+        className={cn(
+          'pointer-events-none fixed right-5 z-50 flex flex-col items-end gap-3 transition-all duration-300',
+          navHidden ? 'bottom-6' : 'bottom-20',
+        )}>
         <div
           aria-hidden={!expanded}
           className={cn(
@@ -190,6 +196,7 @@ function TxFab({
   cats,
 }: Pick<FabProps, 'accountOptions' | 'cats'>) {
   const [open, setOpen] = useState(false)
+  const navHidden = useBottomNavHidden()
   // Dexie-first (coherente con los shells): con copia local, cuentas y
   // catálogo salen de IndexedDB y el form funciona sin conexión. Los props
   // del servidor quedan como fallback de primera carga.
@@ -214,7 +221,7 @@ function TxFab({
       <button
         onClick={() => setOpen(true)}
         aria-label="Registrar movimiento"
-        className={FAB_CLS}>
+        className={cn(FAB_CLS, navHidden ? 'bottom-6' : 'bottom-20')}>
         <Plus className="size-7" />
       </button>
       <BottomSheet open={open} onOpenChange={setOpen}>
