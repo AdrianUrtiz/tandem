@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -22,6 +22,7 @@ import { lookupCategory } from '@/lib/categories'
 import { type OfflineTransaction, db } from '@/lib/offline/db'
 import { isPendingId } from '@/lib/offline/pending'
 import { syncForce } from '@/lib/offline/useSnapshotSync'
+import { type StatementTx, activePeriods } from '@/lib/statements'
 import { formatMoney } from '@/lib/utils'
 import { fmtDayMonth } from '@/lib/walltime'
 
@@ -45,19 +46,35 @@ function CardVisual({
   fav,
   favBusy,
   onToggleFavorite,
+  future = 0,
 }: {
   a: AccountRow
   fav: boolean
   favBusy: boolean
   onToggleFavorite: () => void
+  /** MSI aún no exigibles del corte vigente (segundo segmento). */
+  future?: number
 }) {
   const credit = a.type === 'CREDIT'
   const Icon = credit ? CreditCard : Landmark
-  const available = (a.creditLimit ?? 0) - a.balance
-  const usePct =
-    credit && a.creditLimit
-      ? Math.min(100, (a.balance / a.creditLimit) * 100)
+  const limit = a.creditLimit ?? 0
+  const available = credit ? limit - a.balance : a.balance
+  // Deuda total = actual (exigible) + meses (futuro). Orden: actual primero
+  // (blanco sólido), meses después (blanco tenue que se tiñe del color de
+  // la tarjeta), disponible al final (pista oscura).
+  const futureAmt =
+    credit && limit > 0
+      ? Math.min(Math.max(0, future), Math.max(0, a.balance))
       : 0
+  const dueAmt = credit ? Math.max(0, a.balance - futureAmt) : 0
+  let futurePct = limit > 0 ? (futureAmt / limit) * 100 : 0
+  let duePct = limit > 0 ? (dueAmt / limit) * 100 : 0
+  // Deuda sobre el límite: se escala para no desbordar la barra.
+  if (futurePct + duePct > 100) {
+    const s = 100 / (futurePct + duePct)
+    futurePct *= s
+    duePct *= s
+  }
   return (
     <div
       className="relative overflow-hidden rounded-3xl p-5 text-white shadow-lg"
@@ -98,26 +115,55 @@ function CardVisual({
       <div className="relative mt-3 flex items-end justify-between gap-3">
         <div>
           <p className="text-[11px] font-medium text-white/80">
-            {credit ? 'Deuda actual' : 'Saldo'}
+            {credit ? 'Deuda total' : 'Saldo'}
           </p>
           <p className="text-2xl font-extrabold tracking-tight">
             {formatMoney(credit ? a.balance : available)}
           </p>
+          {a.expiry && (
+            <p className="text-[10px] text-white/80">Vence {a.expiry}</p>
+          )}
         </div>
-        <div className="text-right text-[11px] font-semibold text-white/85">
-          {a.expiry && <p>Vence {a.expiry}</p>}
+        <div className="font-semibold text-white/85">
           {credit && a.creditLimit != null && (
-            <p>Disponible {formatMoney(available)}</p>
+            <div className="relative flex flex-col gap-0.5 text-[10px] font-semibold text-white/80">
+              <span className="flex items-center gap-1">
+                <span className="size-2 shrink-0 rounded-full bg-white/90" />
+                Actual {formatMoney(dueAmt)}
+              </span>
+              {futureAmt > 0 && (
+                <span className="flex items-center gap-1">
+                  <span className="size-2 shrink-0 rounded-full bg-white/40" />
+                  Meses {formatMoney(futureAmt)}
+                </span>
+              )}
+              <span className="flex items-center gap-1">
+                <span className="size-2 shrink-0 rounded-full bg-black/25 ring-1 ring-white/40" />
+                Disponible {formatMoney(available)}
+              </span>
+            </div>
           )}
         </div>
       </div>
       {credit && a.creditLimit != null && (
-        <div className="relative mt-3 h-1.5 overflow-hidden rounded-full bg-black/25">
+        <>
           <div
-            className="h-full rounded-full bg-white/90"
-            style={{ width: `${usePct}%` }}
-          />
-        </div>
+            className="relative mt-3 flex h-1.5 overflow-hidden rounded-full bg-black/25"
+            title={`Actual ${formatMoney(dueAmt)} · Meses ${formatMoney(futureAmt)} · Disponible ${formatMoney(available)}`}>
+            {duePct > 0 && (
+              <div
+                className="h-full bg-white/90"
+                style={{ width: `${duePct}%` }}
+              />
+            )}
+            {futurePct > 0 && (
+              <div
+                className="h-full bg-white/40"
+                style={{ width: `${futurePct}%` }}
+              />
+            )}
+          </div>
+        </>
       )}
     </div>
   )
@@ -217,6 +263,55 @@ export function AccountDetail({
   const visible = (txs ?? []).slice(0, expanded ? EXPANDED : PREVIEW)
   const remaining = (txs ?? []).length - visible.length
 
+  // MSI aún no exigibles del corte vigente (mismo `future` de Resumen >
+  // Estados de cuenta). Dexie-first: se deriva de los movimientos locales
+  // sin tocar el servidor; si no hay MSI, queda en 0 y la barra no cambia.
+  const futureMsi = useMemo(() => {
+    if (!credit) return 0
+    if (!txs || txs.length === 0 || a.balance <= 0) return 0
+    try {
+      const stmtTxs: StatementTx[] = []
+      for (const t of txs) {
+        if (t.accountId !== a.id && t.transferToAccountId !== a.id) continue
+        if (
+          t.type !== 'EXPENSE' &&
+          t.type !== 'INCOME' &&
+          t.type !== 'TRANSFER'
+        )
+          continue
+        stmtTxs.push({
+          id: t.id,
+          type: t.type as 'EXPENSE' | 'INCOME' | 'TRANSFER',
+          amount: t.amount,
+          concept: t.concept,
+          date: new Date(t.date),
+          accountId: t.accountId,
+          transferToAccountId: t.transferToAccountId ?? null,
+          installments: t.installments,
+          statementKey: t.statementKey ?? null,
+        })
+      }
+      if (
+        !stmtTxs.some(
+          (t) =>
+            t.type === 'EXPENSE' &&
+            t.accountId === a.id &&
+            Math.round(t.installments) > 1,
+        )
+      )
+        return 0
+      const { statements, currentKey } = activePeriods(a.id, stmtTxs, {
+        statementDay: a.statementDay,
+        dueDay: a.dueDay,
+      })
+      const cur = statements.find((s) => s.key === currentKey)
+      if (!cur || cur.future <= 0) return 0
+      return Math.min(cur.future, a.balance)
+    } catch {
+      return 0
+    }
+  }, [txs, credit, a.id, a.statementDay, a.dueDay, a.balance])
+
   function seeAll() {
     setAccount(a.name)
     // Rango total: la Actividad mensual ocultaría movimientos viejos.
@@ -231,6 +326,7 @@ export function AccountDetail({
         fav={fav}
         favBusy={favBusy}
         onToggleFavorite={toggleFavorite}
+        future={futureMsi}
       />
 
       <div className="divide-y divide-(--border) rounded-3xl border border-(--border) bg-(--muted)/40 px-4">
