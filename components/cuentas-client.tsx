@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { ArrowUpRight, Check, HandCoins, Users } from 'lucide-react'
 import Link from 'next/link'
@@ -134,7 +134,11 @@ export function CuentasClient({
   const setStmtPeriod = useStatementFilters((s) => s.setPeriod)
   const [openRow, setOpenRow] = useState<string | null>(null)
   const [selected, setSelected] = useState<AccountRow | null>(null)
-  const [reordering, setReordering] = useState(false)
+  const reordering = useCuentasFilters((s) => s.reordering)
+  const setReordering = useCuentasFilters((s) => s.setReordering)
+  // Si se navega fuera a medio ordenar, el modo no debe sobrevivir (el FAB
+  // se oculta mientras está activo).
+  useEffect(() => () => setReordering(false), [setReordering])
   const [paySheet, setPaySheet] = useState<{
     d: PartnerDebt
     mode: 'receive' | 'pay'
@@ -549,7 +553,7 @@ export function CuentasClient({
               active={accType !== 'all'}
               onClick={() => setAccSheet('type')}
             />
-            {mine.length > 1 && (
+            {mine.length + hiddenMine.length > 1 && (
               <button
                 type="button"
                 onClick={() => {
@@ -566,6 +570,7 @@ export function CuentasClient({
             <AccountsReorder
               key="reorder"
               accounts={mine}
+              hiddenAccounts={hiddenMine}
               onClose={() => setReordering(false)}
             />
           ) : (

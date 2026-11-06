@@ -15,6 +15,7 @@ import { useBottomNavHidden } from '@/components/use-bottom-nav-hidden'
 
 import { byAccountOrder, toAccountOpt } from '@/lib/accounts'
 import type { CatalogRow } from '@/lib/catalog'
+import { useCuentasFilters } from '@/lib/cuentas-filters'
 import { db } from '@/lib/offline/db'
 import { toCatalog } from '@/lib/offline/derive-activity'
 import { cn } from '@/lib/utils'
@@ -30,6 +31,11 @@ type FabProps = {
 
 export function Fab({ accountOptions, cats, userName }: FabProps) {
   const pathname = usePathname()
+  const reordering = useCuentasFilters((s) => s.reordering)
+
+  // Modo Ordenar en Cuentas: sin botón flotante (la barra Guardar/Cancelar
+  // va sticky al fondo de la lista).
+  if (reordering) return null
 
   // Resumen, Perfil, Categorías y Grupos: sin botón flotante
   // (el detalle del grupo trae su propio FAB de gasto grupal).

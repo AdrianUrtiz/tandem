@@ -215,9 +215,18 @@ export async function setAccountHidden(id: string, hidden: boolean) {
 
   const acc = await prisma.account.findFirst({
     where: { id, userId },
-    select: { id: true },
+    select: { id: true, isHidden: true },
   })
   if (!acc) return { error: 'Cuenta no encontrada' }
+
+  // Siempre debe quedar al menos una cuenta visible.
+  if (hidden && !acc.isHidden) {
+    const others = await prisma.account.count({
+      where: { userId, isActive: true, isHidden: false, id: { not: id } },
+    })
+    if (others === 0)
+      return { error: 'Debe quedar al menos una cuenta visible' }
+  }
 
   const updated = await prisma.account.updateMany({
     where: { id, userId },
@@ -263,31 +272,68 @@ export async function setFavoriteAccount(id: string) {
   return { ok: true }
 }
 
-// Reorden manual: `ids` en el orden visual deseado (favorita excluida,
-// siempre va primera). Solo cuentas propias.
-export async function reorderAccounts(ids: string[]) {
+// Reorden manual con visibilidad: `visibleIds`/`hiddenIds` en el orden
+// visual deseado (favorita excluida, siempre va primera y nunca se oculta
+// por aquí). Las ocultas se numeran después de las visibles para no alterar
+// los ordenamientos existentes. Debe quedar al menos una visible.
+export async function reorderAccounts(input: {
+  visibleIds: string[]
+  hiddenIds: string[]
+}) {
   const session = await auth()
   const userId = (session?.user as { id?: string } | undefined)?.id
   if (!userId) return { error: 'No autenticado' }
   if (!process.env.DATABASE_URL)
     return { error: 'Configura DATABASE_URL para guardar cambios' }
 
-  const mine = await prisma.account.findMany({
-    where: { userId, isActive: true, isHidden: false },
-    select: { id: true },
+  const owned = await prisma.account.findMany({
+    where: { userId, isActive: true },
+    select: { id: true, isHidden: true, isFavorite: true, position: true },
   })
-  const mineIds = new Set(mine.map((a) => a.id))
-  const clean = ids.filter((id) => mineIds.has(id))
-  if (clean.length === 0) return { error: 'Sin cuentas para ordenar' }
+  const ownedIds = new Set(owned.map((a) => a.id))
+  const byId = new Map(owned.map((a) => [a.id, a]))
+  const cleanVisible = input.visibleIds.filter((id) => ownedIds.has(id))
+  // La favorita va fija y visible: si llega en ocultas se ignora ahí y se
+  // repone abajo en visibles.
+  const cleanHidden = input.hiddenIds.filter(
+    (id) => ownedIds.has(id) && !byId.get(id)?.isFavorite,
+  )
+  // Cuentas propias no enviadas (cliente desactualizado): se conservan al
+  // final de su grupo actual para no perderlas ni colisionar posiciones.
+  const sent = new Set([...cleanVisible, ...cleanHidden])
+  const missing = owned
+    .filter((a) => !sent.has(a.id))
+    .sort((x, y) => (x.position ?? 0) - (y.position ?? 0))
+  const finalVisible = [...cleanVisible]
+  const finalHidden = [...cleanHidden]
+  for (const m of missing) {
+    if (m.isFavorite || !m.isHidden) {
+      if (!finalVisible.includes(m.id)) finalVisible.push(m.id)
+    } else if (!finalHidden.includes(m.id)) {
+      finalHidden.push(m.id)
+    }
+  }
+  if (finalVisible.length === 0)
+    return { error: 'Debe quedar al menos una cuenta visible' }
 
-  await prisma.$transaction(
-    clean.map((id, i) =>
+  await prisma.$transaction([
+    ...finalVisible.map((id, i) =>
       prisma.account.updateMany({
         where: { id, userId },
-        data: { position: i },
+        data: { position: i, isHidden: false },
       }),
     ),
-  )
+    ...finalHidden.map((id, j) =>
+      prisma.account.updateMany({
+        where: { id, userId },
+        data: {
+          position: finalVisible.length + j,
+          isHidden: true,
+          isFavorite: false,
+        },
+      }),
+    ),
+  ])
 
   revalidatePath('/cuentas')
   revalidatePath('/actividad')

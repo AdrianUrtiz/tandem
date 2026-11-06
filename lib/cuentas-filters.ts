@@ -14,12 +14,15 @@ type CuentasFiltersState = {
   partnerState: string
   /** Tab Compartidos: quién debe — 'all' (default), 'partner' (pareja) o 'external' (otras personas). */
   partnerWho: string
+  /** Modo Ordenar activo: oculta el FAB y muestra la barra guardar/cancelar. */
+  reordering: boolean
   setTab: (tab: string) => void
   setAccSort: (v: string) => void
   setAccType: (v: string) => void
   setPartnerMonth: (month: string) => void
   setPartnerState: (v: string) => void
   setPartnerWho: (v: string) => void
+  setReordering: (v: boolean) => void
 }
 
 function currentMonthKey() {
@@ -33,10 +36,12 @@ export const useCuentasFilters = create<CuentasFiltersState>()((set) => ({
   partnerMonth: currentMonthKey(),
   partnerState: 'pending',
   partnerWho: 'all',
+  reordering: false,
   setTab: (tab) => set({ tab }),
   setAccSort: (accSort) => set({ accSort }),
   setAccType: (accType) => set({ accType }),
   setPartnerMonth: (partnerMonth) => set({ partnerMonth }),
   setPartnerState: (partnerState) => set({ partnerState }),
   setPartnerWho: (partnerWho) => set({ partnerWho }),
+  setReordering: (reordering) => set({ reordering }),
 }))
