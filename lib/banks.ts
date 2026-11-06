@@ -13,6 +13,7 @@ import {
   BancoAzteca,
   Banorte,
   Banregio,
+  CajaPopular,
   Cashi,
   Didi,
   Efectivo,
@@ -284,6 +285,13 @@ export const BANKS: Bank[] = [
     color: '#002A3F',
     iconColor: '#E9004C',
     Icon: Openbank,
+  },
+  {
+    id: 'caja-popular',
+    name: 'Caja Popular',
+    color: '#00833D',
+    iconColor: '#ffffff',
+    Icon: CajaPopular,
   },
   {
     id: 'revolut',

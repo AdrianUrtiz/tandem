@@ -889,11 +889,30 @@ const Revolut = (props: SVGProps<SVGSVGElement>) => {
       fill="currentColor"
       {...props}
       viewBox="0 0 35 44">
+      <g fill="currentColor">
+        <path d="M8.1 10.7H0v32.8h8.1z" />
+        <path d="M33.6 12.6C33.6 5.6 27.9 0 21 0H0v7h19.9c3.2 0 5.8 2.5 5.8 5.5 0 1.5-.5 3-1.6 4.1s-2.5 1.7-4 1.7h-7.8c-.3 0-.5.2-.5.5V25c0 .1 0 .2.1.3l13.2 18.3h9.6L21.6 25.2c6.6-.3 12-5.9 12-12.6" />
+      </g>
+    </svg>
+  )
+}
+
+const CajaPopular = (props: SVGProps<SVGSVGElement>) => {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 247 145"
+      fill="currentColor"
+      {...props}>
       <g>
-        <path fill="currentColor" d="M8.1,10.7H0v32.8h8.1V10.7z"></path>
         <path
+          d="M0 136.25h88.832V118H53.5l58-117 9.5 17.5-41 83.332h27.332v42.918H0z"
           fill="currentColor"
-          d="M33.6,12.6c0-7-5.7-12.6-12.6-12.6H0v7h19.9c3.2,0,5.8,2.5,5.8,5.5c0,1.5-0.5,3-1.6,4.1c-1.1,1.1-2.5,1.7-4,1.7h-7.8&#10;&#9;&#9;c-0.3,0-0.5,0.2-0.5,0.5V25c0,0.1,0,0.2,0.1,0.3l13.2,18.3h9.6L21.6,25.2C28.2,24.9,33.6,19.3,33.6,12.6z"></path>
+        />
+        <path
+          d="M247 136.25v8.5H140.668v-42.918h28L137 38.168 107.668 95.5H89.332L136.5 0l58 118h-35.168v18.25z"
+          fill="currentColor"
+        />
       </g>
     </svg>
   )
@@ -939,5 +958,6 @@ export {
   Amex,
   PayPal,
   Revolut,
+  CajaPopular,
   Efectivo,
 }
