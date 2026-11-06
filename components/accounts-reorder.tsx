@@ -198,8 +198,7 @@ export function AccountsReorder({
   return (
     <div className="space-y-4">
       <p className="-mt-1 text-[11px] text-(--muted-foreground)">
-        Mantén presionado ⠿⠿ y arrastra para ordenar o para ocultar/mostrar ·
-        la favorita siempre va primera y no se puede ocultar
+        Mantén presionado ⠿ y arrastra para ordenar o para ocultar/mostrar
       </p>
       {favorite && (
         <div className="flex items-center gap-3 rounded-3xl border border-amber-500/30 bg-amber-500/[0.07] p-3 pr-4">
