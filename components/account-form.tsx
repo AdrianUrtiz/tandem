@@ -462,7 +462,7 @@ export function AccountForm({
             placeholder="Buscar banco…"
             className="h-11"
           />
-          <ul className="max-h-[50dvh] space-y-1 overflow-y-auto pb-2">
+          <ul className="grid max-h-[50dvh] grid-cols-3 gap-2 overflow-y-auto pb-2">
             {filteredBanks.map((b) => {
               const BIcon = b.Icon
               const selected = bankId === b.id
@@ -475,24 +475,26 @@ export function AccountForm({
                       setBankOpen(false)
                       setBankQuery('')
                     }}
+                    title={b.name}
+                    aria-label={b.name}
+                    aria-pressed={selected}
                     className={cn(
-                      'flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition hover:bg-(--muted)',
-                      selected && 'bg-(--muted)',
+                      'flex w-full flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-center transition active:scale-95',
+                      selected
+                        ? 'border-(--primary) bg-(--primary)/10'
+                        : 'border-(--border) hover:bg-(--muted)',
                     )}>
                     <span
-                      className="flex size-10 shrink-0 items-center justify-center rounded-xl"
+                      className="flex size-11 shrink-0 items-center justify-center rounded-xl"
                       style={{
                         backgroundColor: b.color,
                         color: b.iconColor,
                       }}>
-                      <BIcon className="h-auto max-h-4 w-[75%]" aria-hidden />
+                      <BIcon className="h-auto max-h-5 w-[75%]" aria-hidden />
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                    <span className="w-full truncate text-xs font-semibold">
                       {b.name}
                     </span>
-                    {selected && (
-                      <Check className="size-4 shrink-0 text-(--primary)" />
-                    )}
                   </button>
                 </li>
               )
