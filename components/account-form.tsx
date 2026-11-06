@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { Check, CreditCard, Landmark, LayoutGrid, Star } from 'lucide-react'
+import { Check, ChevronDown, CreditCard, Landmark, LayoutGrid, Star } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 
 import { createAccount, updateAccount } from '@/lib/actions'
+import { BANKS, getBank } from '@/lib/banks'
 import { ACCOUNT_COLORS } from '@/lib/categories'
 import { syncForce } from '@/lib/offline/useSnapshotSync'
 import { cn } from '@/lib/utils'
@@ -28,6 +29,7 @@ export type AccountEditData = {
   lastFour?: string
   expiry?: string
   color: string
+  bankId?: string | null
   creditLimit?: number
   statementDay?: number
   dueDay?: number
@@ -38,6 +40,24 @@ function maskExpiry(v: string) {
   const d = v.replace(/\D/g, '').slice(0, 4)
   if (d.length <= 2) return d
   return `${d.slice(0, 2)}/${d.slice(2)}`
+}
+
+/** Texto oscuro si el fondo es claro (ej. HSBC/Scotiabank en blanco). */
+function isLightColor(hex: string): boolean {
+  const h = hex.replace('#', '').trim()
+  const full =
+    h.length === 3
+      ? h
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : h
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return false
+  const r = parseInt(full.slice(0, 2), 16) / 255
+  const g = parseInt(full.slice(2, 4), 16) / 255
+  const b = parseInt(full.slice(4, 6), 16) / 255
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  return lum > 0.6
 }
 
 const fieldCls =
@@ -56,6 +76,9 @@ export function AccountForm({
   const [lastFour, setLastFour] = useState(account?.lastFour ?? '')
   const [expiry, setExpiry] = useState(account?.expiry ?? '')
   const [color, setColor] = useState(account?.color ?? '#6366f1')
+  const [bankId, setBankId] = useState<string | null>(
+    account?.bankId ?? null,
+  )
   const [favorite, setFavorite] = useState(account?.isFavorite ?? false)
   const [initialBalance, setInitialBalance] = useState('')
   const [creditLimit, setCreditLimit] = useState(
@@ -70,11 +93,31 @@ export function AccountForm({
   const [msg, setMsg] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [bankOpen, setBankOpen] = useState(false)
+  const [bankQuery, setBankQuery] = useState('')
 
-  const Icon = type === 'DEBIT' ? Landmark : CreditCard
+  const bank = getBank(bankId)
+  const FallbackIcon = type === 'DEBIT' ? Landmark : CreditCard
+  const PreviewIcon = bank?.Icon ?? FallbackIcon
+  const previewIconColor = bank?.iconColor ?? '#ffffff'
+  const previewLight = isLightColor(color)
+
+  function pickBank(id: string) {
+    const next = getBank(id)
+    if (!next) return
+    setBankId(next.id)
+    // Preselección: icono (derivado de bankId) + color del banco.
+    // El nombre no se toca y el color sigue siendo editable manualmente.
+    setColor(next.color)
+  }
 
   // El color elegido siempre va primero en el deslizable (igual que las
   // categorías en el formulario de movimiento).
+  const filteredBanks = useMemo(() => {
+    const q = bankQuery.trim().toLowerCase()
+    if (!q) return BANKS
+    return BANKS.filter((b) => b.name.toLowerCase().includes(q))
+  }, [bankQuery])
   const sliderColors = useMemo(() => {
     const i = ACCOUNT_COLORS.findIndex(
       (h) => h.toLowerCase() === color.toLowerCase(),
@@ -119,10 +162,15 @@ export function AccountForm({
       {editing && <input type="hidden" name="id" value={account!.id} />}
       {/* Vista previa en vivo */}
       <div
-        className="rounded-3xl p-4 text-white shadow-lg"
-        style={{ background: color }}>
+        className="rounded-3xl p-4 shadow-lg"
+        style={{
+          background: color,
+          color: previewLight ? '#0f172a' : '#ffffff',
+        }}>
         <div className="flex items-center justify-between">
-          <Icon className="size-6" />
+          <span style={{ color: previewIconColor }}>
+            <PreviewIcon className="size-6 max-w-16" aria-hidden />
+          </span>
           <span className="text-[11px] font-bold tracking-widest uppercase opacity-80">
             {type === 'DEBIT' ? 'Débito' : 'Crédito'}
           </span>
@@ -159,6 +207,50 @@ export function AccountForm({
         </div>
       )}
       <input type="hidden" name="type" value={type} />
+
+      <div className="space-y-1.5">
+        <Label>Banco</Label>
+        <button
+          type="button"
+          onClick={() => setBankOpen(true)}
+          className={cn(
+            'flex w-full items-center gap-3 rounded-2xl border border-(--border) bg-(--card) px-4 py-3 text-left transition active:scale-[0.99]',
+          )}>
+          {bank ? (
+            <>
+              <span
+                className="flex size-9 shrink-0 items-center justify-center rounded-xl"
+                style={{ backgroundColor: bank.color, color: bank.iconColor }}>
+                <PreviewIcon className="size-4 max-w-[75%]" aria-hidden />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold">
+                  {bank.name}
+                </span>
+                <span className="block text-xs text-(--muted-foreground)">
+                  {type === 'DEBIT' ? 'Débito' : 'Crédito'} · toca para cambiar
+                </span>
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-(--muted) text-(--muted-foreground)">
+                <FallbackIcon className="size-4" aria-hidden />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold">
+                  Seleccionar banco
+                </span>
+                <span className="block text-xs text-(--muted-foreground)">
+                  Opcional
+                </span>
+              </span>
+            </>
+          )}
+          <ChevronDown className="size-4 shrink-0 text-(--muted-foreground)" />
+        </button>
+        <input type="hidden" name="bankId" value={bankId ?? ''} />
+      </div>
 
       <div className="space-y-1.5">
         <Label htmlFor="acc-name">Nombre</Label>
@@ -347,6 +439,67 @@ export function AccountForm({
             ? 'Guardar cambios'
             : 'Agregar cuenta'}
       </Button>
+
+      {/* Selector de banco (escala a N bancos con buscador) */}
+      <Dialog
+        open={bankOpen}
+        onOpenChange={(o) => {
+          setBankOpen(o)
+          if (!o) setBankQuery('')
+        }}>
+        <DialogContent className="max-h-[86dvh]">
+          <DialogHeader>
+            <DialogTitle>Seleccionar banco</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={bankQuery}
+            onChange={(e) => setBankQuery(e.target.value)}
+            placeholder="Buscar banco…"
+            className="h-11"
+          />
+          <ul className="max-h-[50dvh] space-y-1 overflow-y-auto pb-2">
+            {filteredBanks.map((b) => {
+              const BIcon = b.Icon
+              const selected = bankId === b.id
+              return (
+                <li key={b.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pickBank(b.id)
+                      setBankOpen(false)
+                      setBankQuery('')
+                    }}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition hover:bg-(--muted)',
+                      selected && 'bg-(--muted)',
+                    )}>
+                    <span
+                      className="flex size-9 shrink-0 items-center justify-center rounded-xl"
+                      style={{
+                        backgroundColor: b.color,
+                        color: b.iconColor,
+                      }}>
+                      <BIcon className="size-4 max-w-[75%]" aria-hidden />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                      {b.name}
+                    </span>
+                    {selected && (
+                      <Check className="size-4 shrink-0 text-(--primary)" />
+                    )}
+                  </button>
+                </li>
+              )
+            })}
+            {filteredBanks.length === 0 && (
+              <li className="px-3 py-6 text-center text-sm text-(--muted-foreground)">
+                Sin resultados para “{bankQuery.trim()}”.
+              </li>
+            )}
+          </ul>
+        </DialogContent>
+      </Dialog>
 
       {/* Paleta completa de colores */}
       <Dialog open={paletteOpen} onOpenChange={setPaletteOpen}>

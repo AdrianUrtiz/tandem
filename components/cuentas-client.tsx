@@ -372,7 +372,13 @@ export function CuentasClient({
       onSelect={() => setSelected(a)}
       debitOptions={mine
         .filter((m) => m.type === 'DEBIT')
-        .map((m) => ({ id: m.id, name: m.name, type: m.type, color: m.color }))}
+        .map((m) => ({
+          id: m.id,
+          name: m.name,
+          type: m.type,
+          color: m.color,
+          bankId: m.bankId ?? null,
+        }))}
     />
   )
 
@@ -406,6 +412,7 @@ export function CuentasClient({
         name: a.name,
         type: a.type,
         color: a.color,
+        bankId: a.bankId ?? null,
       })),
     [mine],
   )
@@ -1359,7 +1366,13 @@ function SourceConfirmSheet({
   onDone,
 }: {
   p: SourceConfirmItem
-  accountOptions: { id: string; name: string; type?: string; color?: string }[]
+  accountOptions: {
+    id: string
+    name: string
+    type?: string
+    color?: string
+    bankId?: string | null
+  }[]
   onDone: () => void
 }) {
   const [accountId, setAccountId] = useState(accountOptions[0]?.id ?? '')
@@ -1406,7 +1419,7 @@ function SourceConfirmSheet({
               type="button"
               onClick={() => setAccountId(a.id)}
               className={`flex w-full items-center gap-2 rounded-2xl px-4 py-2.5 text-left transition hover:bg-(--muted) ${accountId === a.id ? 'bg-(--muted)' : ''}`}>
-              <AccountIcon type={a.type} color={a.color} />
+              <AccountIcon type={a.type} color={a.color} bankId={a.bankId} />
               <span className="flex-1 text-sm font-semibold">{a.name}</span>
               {accountId === a.id && (
                 <Check className="size-4 text-(--primary)" />

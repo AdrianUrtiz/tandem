@@ -17,6 +17,7 @@ export function toAccountOpt(a: {
   name: string
   type?: string | null
   color?: string | null
+  bankId?: string | null
   isFavorite?: boolean | null
   position?: number | null
 }): AccountOpt {
@@ -25,6 +26,7 @@ export function toAccountOpt(a: {
     name: a.name,
     type: a.type ?? undefined,
     color: a.color ?? undefined,
+    bankId: a.bankId ?? undefined,
     isFavorite: a.isFavorite ?? undefined,
     position: a.position ?? undefined,
   }

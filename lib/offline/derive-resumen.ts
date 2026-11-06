@@ -36,6 +36,7 @@ export function toAccountOptions(accounts: OfflineAccount[]): AccountOpt[] {
       name: a.name,
       type: a.type,
       color: a.color,
+      bankId: a.bankId ?? null,
       isFavorite: a.isFavorite,
       position: a.position,
     }))

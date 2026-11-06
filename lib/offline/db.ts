@@ -10,10 +10,11 @@ import type { CardPayCandidate } from '@/lib/card-pay'
 // (el sprint de creación offline añadirá índices/flags sin romper v2).
 // v8 agrega el índice `lastUsedAt` a `places` (el orden de sugerencias).
 // v9 agrega la tabla `companions` (amigos del gasto en grupo).
-export const DB_VERSION = 9
+// v10 agrega `bankId` a `accounts` (banco emisor, preset de icono/color).
+export const DB_VERSION = 10
 export const DB_NAME = 'tandem-db'
 // Versión del payload de /api/snapshot que esta DB sabe guardar.
-export const SNAPSHOT_VERSION = 8
+export const SNAPSHOT_VERSION = 9
 
 export type SyncMeta = {
   key: string // siempre 'sync'
@@ -37,6 +38,8 @@ export type OfflineAccount = {
   lastFour?: string
   expiry?: string
   color: string
+  /** Banco emisor (id de `lib/banks.ts`). Null = cuenta anterior sin banco. */
+  bankId?: string | null
   isHidden: boolean
   position: number
   isFavorite: boolean

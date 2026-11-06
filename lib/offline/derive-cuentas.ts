@@ -53,6 +53,7 @@ export function toAccountRows(accounts: OfflineAccount[]): {
     lastFour: a.lastFour,
     expiry: a.expiry,
     color: a.color,
+    bankId: a.bankId ?? null,
     isHidden: a.isHidden,
     position: a.position,
     isFavorite: a.isFavorite,

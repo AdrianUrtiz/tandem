@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import type { AccountRow } from '@/components/account-card'
 
 import { setFavoriteAccount } from '@/lib/actions'
+import { getBank } from '@/lib/banks'
 import { useActivityFilters } from '@/lib/activity-filters'
 import type { CatalogRow } from '@/lib/catalog'
 import { lookupCategory } from '@/lib/categories'
@@ -40,6 +41,23 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
+/** Texto oscuro si el fondo es claro (ej. HSBC/Scotiabank en blanco). */
+function isLightColor(hex: string): boolean {
+  const h = hex.replace('#', '').trim()
+  const full =
+    h.length === 3
+      ? h
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : h
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return false
+  const r = parseInt(full.slice(0, 2), 16) / 255
+  const g = parseInt(full.slice(2, 4), 16) / 255
+  const b = parseInt(full.slice(4, 6), 16) / 255
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6
+}
+
 /** Tarjeta simulada con los datos de la cuenta. */
 function CardVisual({
   a,
@@ -56,7 +74,9 @@ function CardVisual({
   future?: number
 }) {
   const credit = a.type === 'CREDIT'
-  const Icon = credit ? CreditCard : Landmark
+  const bank = getBank(a.bankId)
+  const FallbackIcon = credit ? CreditCard : Landmark
+  const BankIcon = bank?.Icon
   const limit = a.creditLimit ?? 0
   const available = credit ? limit - a.balance : a.balance
   // Deuda total = actual (exigible) + meses (futuro). Orden: actual primero
@@ -75,26 +95,36 @@ function CardVisual({
     futurePct *= s
     duePct *= s
   }
+  const light = isLightColor(a.color)
+  const fg = light ? '#0f172a' : '#ffffff'
+  const ringCls = light ? 'ring-black/20' : 'ring-white/40'
   return (
     <div
-      className="relative overflow-hidden rounded-3xl p-5 text-white shadow-lg"
+      className="relative overflow-hidden rounded-3xl p-6 shadow-lg"
       style={{
         background: `linear-gradient(135deg, ${a.color}, ${a.color}88)`,
+        color: fg,
       }}>
       <div className="relative flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-bold">{a.name}</p>
-          <p className="text-xs font-medium text-white/80">
+          <p className="text-xs font-medium opacity-80">
             {credit ? 'Crédito' : 'Débito'} · {a.owner}
           </p>
         </div>
-        <span className="flex items-center gap-1.5 rounded-xl bg-black/25 px-2.5 py-1.5">
-          <Icon className="size-4" />
+        <span className="flex items-center gap-2 rounded-2xl bg-black/25 px-3 py-2">
+          {BankIcon ? (
+            <span style={{ color: bank?.iconColor ?? '#ffffff' }}>
+              <BankIcon className="size-5" aria-hidden />
+            </span>
+          ) : (
+            <FallbackIcon className="size-5" />
+          )}
           {!a.isHidden &&
             (fav ? (
               <Star
                 aria-label="Cuenta favorita"
-                className="size-3.5 fill-amber-300 text-amber-300"
+                className="size-5 fill-amber-300 text-amber-300"
               />
             ) : (
               <button
@@ -104,7 +134,7 @@ function CardVisual({
                 aria-label="Marcar como favorita"
                 title="Marcar como favorita"
                 className="transition active:scale-90 disabled:opacity-50">
-                <Star className="size-3.5 text-white/70" />
+                <Star className="size-5 opacity-70" />
               </button>
             ))}
         </span>
@@ -114,31 +144,39 @@ function CardVisual({
       </p>
       <div className="relative mt-3 flex items-end justify-between gap-3">
         <div>
-          <p className="text-[11px] font-medium text-white/80">
+          <p className="text-[11px] font-medium opacity-80">
             {credit ? 'Deuda total' : 'Saldo'}
           </p>
           <p className="text-2xl font-extrabold tracking-tight">
             {formatMoney(credit ? a.balance : available)}
           </p>
           {a.expiry && (
-            <p className="text-[10px] text-white/80">Vence {a.expiry}</p>
+            <p className="text-[10px] opacity-80">Vence {a.expiry}</p>
           )}
         </div>
-        <div className="font-semibold text-white/85">
+        <div className="font-semibold opacity-85">
           {credit && a.creditLimit != null && (
-            <div className="relative flex flex-col gap-0.5 text-[10px] font-semibold text-white/80">
+            <div className="relative flex flex-col gap-0.5 text-[10px] font-semibold opacity-80">
               <span className="flex items-center gap-1">
-                <span className="size-2 shrink-0 rounded-full bg-white/90" />
+                <span
+                  className="size-2 shrink-0 rounded-full opacity-90"
+                  style={{ backgroundColor: fg }}
+                />
                 Actual {formatMoney(dueAmt)}
               </span>
               {futureAmt > 0 && (
                 <span className="flex items-center gap-1">
-                  <span className="size-2 shrink-0 rounded-full bg-white/40" />
+                  <span
+                    className="size-2 shrink-0 rounded-full opacity-40"
+                    style={{ backgroundColor: fg }}
+                  />
                   Meses {formatMoney(futureAmt)}
                 </span>
               )}
               <span className="flex items-center gap-1">
-                <span className="size-2 shrink-0 rounded-full bg-black/25 ring-1 ring-white/40" />
+                <span
+                  className={`size-2 shrink-0 rounded-full bg-black/25 ring-1 ${ringCls}`}
+                />
                 Disponible {formatMoney(available)}
               </span>
             </div>
@@ -152,14 +190,14 @@ function CardVisual({
             title={`Actual ${formatMoney(dueAmt)} · Meses ${formatMoney(futureAmt)} · Disponible ${formatMoney(available)}`}>
             {duePct > 0 && (
               <div
-                className="h-full bg-white/90"
-                style={{ width: `${duePct}%` }}
+                className="h-full opacity-90"
+                style={{ width: `${duePct}%`, backgroundColor: fg }}
               />
             )}
             {futurePct > 0 && (
               <div
-                className="h-full bg-white/40"
-                style={{ width: `${futurePct}%` }}
+                className="h-full opacity-40"
+                style={{ width: `${futurePct}%`, backgroundColor: fg }}
               />
             )}
           </div>

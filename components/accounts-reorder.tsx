@@ -55,7 +55,7 @@ function SortableRow({ a }: { a: AccountRow }) {
         className="flex size-9 shrink-0 cursor-grab touch-none items-center justify-center rounded-xl text-(--muted-foreground) active:cursor-grabbing">
         <GripVertical className="size-5" />
       </button>
-      <AccountIcon type={a.type} color={a.color} />
+      <AccountIcon type={a.type} color={a.color} bankId={a.bankId} />
       <span className="min-w-0 flex-1 truncate text-sm font-semibold">
         {a.name}
       </span>
@@ -133,7 +133,11 @@ export function AccountsReorder({
           <span className="flex size-9 shrink-0 items-center justify-center">
             <Star className="size-5 fill-amber-400 text-amber-400" />
           </span>
-          <AccountIcon type={favorite.type} color={favorite.color} />
+          <AccountIcon
+            type={favorite.type}
+            color={favorite.color}
+            bankId={favorite.bankId}
+          />
           <span className="min-w-0 flex-1 truncate text-sm font-semibold">
             {favorite.name}
           </span>

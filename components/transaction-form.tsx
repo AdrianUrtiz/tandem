@@ -69,6 +69,7 @@ export type AccountOpt = {
   name: string
   type?: string
   color?: string
+  bankId?: string | null
   isFavorite?: boolean
   position?: number
 }
@@ -1344,7 +1345,7 @@ export function TransactionForm({
                       'flex w-full items-center gap-2 rounded-2xl px-4 py-2.5 text-left transition hover:bg-(--muted)',
                       selected && 'bg-(--muted)',
                     )}>
-                    <AccountIcon type={a.type} color={a.color} />
+                    <AccountIcon type={a.type} color={a.color} bankId={a.bankId} />
                     <span className="flex-1 text-sm font-semibold">
                       {a.name}
                     </span>

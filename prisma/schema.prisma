@@ -75,6 +75,9 @@ model Account {
   lastFour   String?
   expiry     String? // vencimiento MM/AA
   color      String? @default("#6366f1")
+  // Banco emisor (ej. 'bbva', 'otro'). Solo preset visual: el color se puede
+  // personalizar y el icono se deriva de `lib/banks.ts`.
+  bankId     String?
   // Orden manual (menor = primero) y favorita (siempre primera y
   // preseleccionada en formularios). Una sola favorita por usuario
   // (se garantiza en los server actions).

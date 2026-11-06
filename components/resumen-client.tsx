@@ -413,6 +413,7 @@ export function ResumenClient({
                   total: o.total,
                   iconType: o.meta?.type,
                   iconColor: o.meta?.color,
+                  iconBankId: o.meta?.bankId ?? null,
                 })),
               ]}
               value={account}
@@ -497,6 +498,7 @@ function Options({
     cap?: boolean
     iconType?: string
     iconColor?: string
+    iconBankId?: string | null
   }[]
   value: string
   onPick: (v: string) => void
@@ -511,7 +513,11 @@ function Options({
               it.value === value ? 'bg-(--muted)' : ''
             }`}>
             {it.iconColor && (
-              <AccountIcon type={it.iconType} color={it.iconColor} />
+              <AccountIcon
+                type={it.iconType}
+                color={it.iconColor}
+                bankId={it.iconBankId}
+              />
             )}
             <span
               className={`flex-1 text-sm font-semibold ${it.cap ? 'capitalize' : ''}`}>

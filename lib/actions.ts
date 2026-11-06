@@ -27,6 +27,7 @@ const AccountSchema = z.object({
   lastFour: z.string().optional(),
   expiry: z.string().optional(),
   color: z.string().optional(),
+  bankId: z.string().max(32).optional(),
   initialBalance: z.coerce
     .number()
     .min(0)
@@ -75,6 +76,7 @@ export async function createAccount(formData: FormData) {
       lastFour: v.lastFour || null,
       expiry,
       color: v.color || '#6366f1',
+      bankId: v.bankId?.trim() ? v.bankId.trim() : null,
       position: await prisma.account.count({ where: { userId } }),
       isFavorite: v.isFavorite === '1',
       initialBalance: v.type === 'DEBIT' ? v.initialBalance : null,
@@ -107,6 +109,7 @@ const UpdateAccountSchema = z.object({
   lastFour: z.string().optional(),
   expiry: z.string().optional(),
   color: z.string().optional(),
+  bankId: z.string().max(32).optional(),
   creditLimit: z.coerce
     .number()
     .min(0)
@@ -149,6 +152,7 @@ export async function updateAccount(formData: FormData) {
       lastFour: v.lastFour?.trim() ? v.lastFour.trim() : null,
       expiry,
       color: v.color || acc.color,
+      bankId: v.bankId?.trim() ? v.bankId.trim() : null,
       ...(acc.type === 'CREDIT'
         ? {
             creditLimit: v.creditLimit ?? acc.creditLimit,

@@ -321,6 +321,7 @@ export function GroupDetailClient({  detail,
     name: a.name,
     type: a.type,
     color: a.color,
+    bankId: a.bankId ?? null,
   }))
 
   const memberColors = new Map<string, string>()
@@ -1090,7 +1091,7 @@ export function GroupDetailClient({  detail,
                       'flex w-full items-center gap-2 rounded-2xl px-4 py-2.5 text-left transition hover:bg-(--muted)',
                       claimAccountId === a.id && 'bg-(--muted)',
                     )}>
-                    <AccountIcon type={a.type} color={a.color} />
+                    <AccountIcon type={a.type} color={a.color} bankId={a.bankId} />
                     <span className="flex-1 text-sm font-semibold">
                       {a.name}
                     </span>
@@ -1236,7 +1237,13 @@ function SettlementSheet({
     cap: number
     settlementId?: string
   }
-  accountOptions: { id: string; name: string; type?: string; color?: string | null }[]
+  accountOptions: {
+    id: string
+    name: string
+    type?: string
+    color?: string | null
+    bankId?: string | null
+  }[]
   onDone: () => void
 }) {
   const router = useRouter()
@@ -1370,7 +1377,7 @@ function SettlementSheet({
                   'flex w-full items-center gap-2 rounded-2xl px-4 py-2.5 text-left transition hover:bg-(--muted)',
                   withMovement && accountId === a.id && 'bg-(--muted)',
                 )}>
-                <AccountIcon type={a.type} color={a.color} />
+                <AccountIcon type={a.type} color={a.color} bankId={a.bankId} />
                 <span className="flex-1 text-sm font-semibold">{a.name}</span>
                 {withMovement && accountId === a.id && (
                   <Check className="size-4 text-(--primary)" />

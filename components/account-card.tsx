@@ -2,6 +2,7 @@ import { CreditCard, Landmark, Star } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 
+import { getBank } from '@/lib/banks'
 import { formatMoney } from '@/lib/utils'
 
 export type AccountRow = {
@@ -17,6 +18,7 @@ export type AccountRow = {
   lastFour?: string
   expiry?: string
   color: string
+  bankId?: string | null
   isHidden: boolean
   position: number
   isFavorite: boolean
@@ -25,13 +27,22 @@ export type AccountRow = {
 export function AccountCard({ a }: { a: AccountRow }) {
   const credit = a.type === 'CREDIT'
   const available = credit ? (a.creditLimit ?? 0) - a.balance : a.balance
-  const Icon = credit ? CreditCard : Landmark
+  const bank = getBank(a.bankId)
+  const FallbackIcon = credit ? CreditCard : Landmark
+  const BankIcon = bank?.Icon
   return (
     <div className="flex items-center gap-3 rounded-3xl border border-(--border) bg-(--card) p-4">
       <span
-        className="relative flex size-11 shrink-0 items-center justify-center rounded-2xl text-white"
-        style={{ background: a.color }}>
-        <Icon className="size-5" />
+        className="relative flex size-11 shrink-0 items-center justify-center rounded-2xl"
+        style={{
+          background: a.color,
+          color: bank?.iconColor ?? '#ffffff',
+        }}>
+        {BankIcon ? (
+          <BankIcon className="size-5 max-w-[80%]" aria-hidden />
+        ) : (
+          <FallbackIcon className="size-5" />
+        )}
         {a.isFavorite && (
           <span
             aria-label="Cuenta favorita"

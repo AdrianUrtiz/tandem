@@ -113,6 +113,7 @@ export async function buildSnapshot(userId: string): Promise<SnapshotPayload> {
     lastFour: a.lastFour ?? undefined,
     expiry: a.expiry ?? undefined,
     color: a.color ?? '#6366f1',
+    bankId: a.bankId ?? null,
     isHidden: a.isHidden,
     position: a.position,
     isFavorite: a.isFavorite,

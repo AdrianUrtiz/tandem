@@ -27,6 +27,7 @@ export default async function AppLayout({
       name: true,
       type: true,
       color: true,
+      bankId: true,
       isFavorite: true,
       position: true,
     },
@@ -41,6 +42,7 @@ export default async function AppLayout({
     name: r.name,
     type: r.type as 'DEBIT' | 'CREDIT',
     color: r.color ?? '#6366f1',
+    bankId: r.bankId ?? null,
     isFavorite: r.isFavorite,
     position: r.position,
   }))
