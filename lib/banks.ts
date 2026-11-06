@@ -314,7 +314,6 @@ export const BANKS: Bank[] = [
     iconColor: '#ffffff',
     Icon: Landmark,
   },
-
 ]
 
 export const BANK_MAP: Record<string, Bank> = Object.fromEntries(
