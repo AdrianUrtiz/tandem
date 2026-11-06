@@ -2,7 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { Check, ChevronDown, CreditCard, Landmark, LayoutGrid, Star } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  CreditCard,
+  Landmark,
+  LayoutGrid,
+  Star,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -76,9 +83,7 @@ export function AccountForm({
   const [lastFour, setLastFour] = useState(account?.lastFour ?? '')
   const [expiry, setExpiry] = useState(account?.expiry ?? '')
   const [color, setColor] = useState(account?.color ?? '#6366f1')
-  const [bankId, setBankId] = useState<string | null>(
-    account?.bankId ?? null,
-  )
+  const [bankId, setBankId] = useState<string | null>(account?.bankId ?? null)
   const [favorite, setFavorite] = useState(account?.isFavorite ?? false)
   const [initialBalance, setInitialBalance] = useState('')
   const [creditLimit, setCreditLimit] = useState(
@@ -169,7 +174,7 @@ export function AccountForm({
         }}>
         <div className="flex items-center justify-between">
           <span style={{ color: previewIconColor }}>
-            <PreviewIcon className="size-6 max-w-16" aria-hidden />
+            <PreviewIcon className="h-5 w-auto max-w-24" aria-hidden />
           </span>
           <span className="text-[11px] font-bold tracking-widest uppercase opacity-80">
             {type === 'DEBIT' ? 'Débito' : 'Crédito'}
@@ -221,7 +226,7 @@ export function AccountForm({
               <span
                 className="flex size-9 shrink-0 items-center justify-center rounded-xl"
                 style={{ backgroundColor: bank.color, color: bank.iconColor }}>
-                <PreviewIcon className="size-4 max-w-[75%]" aria-hidden />
+                <PreviewIcon className="h-auto max-h-4 w-[75%]" aria-hidden />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-semibold">
@@ -475,12 +480,12 @@ export function AccountForm({
                       selected && 'bg-(--muted)',
                     )}>
                     <span
-                      className="flex size-9 shrink-0 items-center justify-center rounded-xl"
+                      className="flex size-10 shrink-0 items-center justify-center rounded-xl"
                       style={{
                         backgroundColor: b.color,
                         color: b.iconColor,
                       }}>
-                      <BIcon className="size-4 max-w-[75%]" aria-hidden />
+                      <BIcon className="h-auto max-h-4 w-[75%]" aria-hidden />
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold">
                       {b.name}

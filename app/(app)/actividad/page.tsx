@@ -202,6 +202,7 @@ export default async function ActividadPage() {
         lastFour: true,
         expiry: true,
         color: true,
+        bankId: true,
         isFavorite: true,
         position: true,
       },
@@ -250,6 +251,7 @@ export default async function ActividadPage() {
     name: a.name,
     type: a.type as 'DEBIT' | 'CREDIT',
     color: a.color ?? '#6366f1',
+    bankId: a.bankId ?? null,
     isFavorite: a.isFavorite,
     position: a.position,
   }))

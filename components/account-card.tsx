@@ -39,7 +39,7 @@ export function AccountCard({ a }: { a: AccountRow }) {
           color: bank?.iconColor ?? '#ffffff',
         }}>
         {BankIcon ? (
-          <BankIcon className="size-5 max-w-[80%]" aria-hidden />
+          <BankIcon className="h-auto max-h-5 w-[75%]" aria-hidden />
         ) : (
           <FallbackIcon className="size-5" />
         )}

@@ -171,7 +171,13 @@ export function deriveStatements(
       (x, y) =>
         Number(y.isFavorite) - Number(x.isFavorite) || x.position - y.position,
     )
-    .map((d) => ({ id: d.id, name: d.name, type: d.type, color: d.color }))
+    .map((d) => ({
+      id: d.id,
+      name: d.name,
+      type: d.type,
+      color: d.color,
+      bankId: d.bankId ?? null,
+    }))
 
   return cards.map((c) => {
     const txs = cardTxs.filter(
@@ -195,6 +201,7 @@ export function deriveStatements(
         name: c.name,
         lastFour: c.lastFour ?? null,
         color: c.color,
+        bankId: c.bankId ?? null,
         creditLimit: limit,
         statementDay: c.statementDay ?? null,
         dueDay: c.dueDay ?? null,

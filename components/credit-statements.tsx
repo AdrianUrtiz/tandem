@@ -114,6 +114,7 @@ export type CreditStatementView = {
     name: string
     lastFour: string | null
     color: string
+    bankId: string | null
     creditLimit: number | null
     statementDay: number | null
     dueDay: number | null
@@ -415,6 +416,7 @@ export function CreditStatements({
                     label: cardLabel(s.card),
                     total: s.card.currentDebt,
                     color: s.card.color,
+                    bankId: s.card.bankId,
                   }))}
                   value={view.card.id}
                   onPick={(v) => {
@@ -590,6 +592,7 @@ function Options({
     total?: number
     cap?: boolean
     color?: string
+    bankId?: string | null
   }[]
   value: string
   onPick: (v: string) => void
@@ -602,7 +605,9 @@ function Options({
             onClick={() => onPick(it.value)}
             className={`flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-left transition hover:bg-(--muted) ${it.value === value ? 'bg-(--muted)' : ''
               }`}>
-            {it.color && <AccountIcon type="CREDIT" color={it.color} />}
+            {it.color && (
+              <AccountIcon type="CREDIT" color={it.color} bankId={it.bankId} />
+            )}
             <span
               className={`flex-1 text-sm font-semibold ${it.cap ? 'capitalize' : ''}`}>
               {it.label}

@@ -115,7 +115,7 @@ function CardVisual({
         <span className="flex items-center gap-2 rounded-2xl bg-black/25 px-3 py-2">
           {BankIcon ? (
             <span style={{ color: bank?.iconColor ?? '#ffffff' }}>
-              <BankIcon className="size-5" aria-hidden />
+              <BankIcon className="h-4 w-auto max-w-27.5" aria-hidden />
             </span>
           ) : (
             <FallbackIcon className="size-5" />
