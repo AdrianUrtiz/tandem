@@ -1,17 +1,14 @@
-import type {
-  MsiItemView,
-  MsiPaymentsView,
-} from '@/components/msi-concentrado'
+import type { MsiItemView, MsiPaymentsView } from '@/components/msi-concentrado'
 
 import { installmentMonths } from '@/lib/calculations'
 import { getLineSums } from '@/lib/debt-payments'
 import { normalizeMoney, toCents } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 import {
+  type StatementTx,
   activePeriods,
   installmentDate,
   periodContaining,
-  type StatementTx,
 } from '@/lib/statements'
 import { startOfWallDay, utc, wallNow } from '@/lib/walltime'
 
@@ -43,6 +40,34 @@ export async function getMsiConcentrado(meId: string): Promise<{
   const sums = await getLineSums(rows.flatMap((t) => t.shares.map((s) => s.id)))
   const msiPayments: MsiPaymentsView = {}
   for (const [k, v] of sums) msiPayments[k] = { c: v.confirmed, p: v.pending }
+
+  // Adelantos registrados: payKey → { aplicado al mes, cargado hoy }.
+  const advancesByTx = new Map<
+    string,
+    Record<string, { applied: number; paidNow: number }>
+  >()
+  if (rows.length > 0) {
+    const advanceRows = await prisma.transaction.findMany({
+      where: {
+        advanceForTxId: { in: rows.map((t) => t.id) },
+      },
+      select: {
+        type: true,
+        advanceForTxId: true,
+        advanceForMonth: true,
+        amount: true,
+      },
+    })
+    for (const r of advanceRows) {
+      if (!r.advanceForTxId || !r.advanceForMonth) continue
+      const rec = advancesByTx.get(r.advanceForTxId) ?? {}
+      const entry = rec[r.advanceForMonth] ?? { applied: 0, paidNow: 0 }
+      if (r.type === 'INCOME') entry.applied = normalizeMoney(r.amount)
+      else if (r.type === 'EXPENSE') entry.paidNow = normalizeMoney(r.amount)
+      rec[r.advanceForMonth] = entry
+      advancesByTx.set(r.advanceForTxId, rec)
+    }
+  }
 
   // Parcialidades liquidadas de MIS compras (clave de registro "YYYY-MM"):
   // - Débito: lo cargado ya salió de la cuenta.
@@ -154,6 +179,7 @@ export async function getMsiConcentrado(meId: string): Promise<{
       statementDay: t.account?.statementDay ?? null,
       dueDay: t.account?.dueDay ?? null,
       settledPayKeys: [...(settledByTx.get(t.id) ?? [])],
+      advances: advancesByTx.get(t.id) ?? {},
       isShared: t.isShared,
       createdById: t.createdById,
       creatorName: t.createdBy.name,

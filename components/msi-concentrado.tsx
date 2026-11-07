@@ -12,12 +12,25 @@ import {
   Users,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 
 import { payableInstallments } from '@/lib/calculations'
-import { splitMoney, toCents } from '@/lib/money'
+import { fromCents, splitMoney, toCents } from '@/lib/money'
+import { syncForce } from '@/lib/offline/useSnapshotSync'
+import { prepayInstallment } from '@/lib/prepay-installment'
 import { formatMoney, monthLabelEs } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import {
@@ -48,6 +61,8 @@ export type MsiItemView = {
   dueDay: number | null
   /** Parcialidades liquidadas de mis compras (claves "YYYY-MM"). */
   settledPayKeys: string[]
+  /** Adelantos registrados: payKey → { aplicado al mes, cargado hoy }. */
+  advances: Record<string, { applied: number; paidNow: number }>
   isShared: boolean
   createdById: string
   creatorName: string
@@ -118,9 +133,14 @@ function computeItem(it: MsiItemView, curKey: string): Computed {
   const finished = curKey > due[n - 1]!.dueKey
   const notStarted = curKey < due[0]!.dueKey
   const monthlyNow = split[curIdx] ?? 0
+  // Cubiertas (liquidadas o adelantadas) ya no restan, aunque venzan después.
+  const isCovered = (m: string) =>
+    it.settledPayKeys.includes(m) || (it.advances != null && m in it.advances)
   const remainingTotal = finished
     ? 0
-    : split.slice(curIdx).reduce((a, v) => a + v, 0)
+    : split
+        .filter((_, i) => i >= curIdx && !isCovered(months[i]!))
+        .reduce((a, v) => a + v, 0)
   const paidTotal = finished
     ? it.amount
     : split.slice(0, curIdx).reduce((a, v) => a + v, 0)
@@ -162,6 +182,7 @@ function shareTotals(
 /** Estado de pago de una parcialidad compartida (lo que se debe vs abonado). */
 type MonthState =
   | 'paid'
+  | 'prepaid'
   | 'charged'
   | 'toConfirm'
   | 'partial'
@@ -175,6 +196,11 @@ const MONTH_PILL: Record<
 > = {
   paid: {
     text: 'Pagada',
+    cls: 'bg-emerald-500/15 text-emerald-500',
+    Icon: Check,
+  },
+  prepaid: {
+    text: 'Adelantada',
     cls: 'bg-emerald-500/15 text-emerald-500',
     Icon: Check,
   },
@@ -210,6 +236,140 @@ const MONTH_PILL: Record<
   },
 }
 
+/** Formulario inline para adelantar una parcialidad futura (solo-mías). */
+function PrepayForm({
+  txId,
+  month,
+  monthly,
+  label,
+  onDone,
+}: {
+  txId: string
+  month: string
+  monthly: number
+  label: string
+  onDone: () => void
+}) {
+  const router = useRouter()
+  const [applied, setApplied] = useState(String(monthly))
+  const [hasDiscount, setHasDiscount] = useState(false)
+  const [discount, setDiscount] = useState('')
+  const [msg, setMsg] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const appliedC = toCents(Number(applied) || 0)
+  const discountC = hasDiscount ? toCents(Number(discount) || 0) : 0
+  const chargedC = appliedC - discountC
+
+  async function submit() {
+    setMsg(null)
+    setPending(true)
+    const fd = new FormData()
+    fd.set('transactionId', txId)
+    fd.set('month', month)
+    fd.set('applied', applied)
+    if (hasDiscount) fd.set('discount', discount)
+    const res = await prepayInstallment(fd)
+    setPending(false)
+    if ('error' in res && res.error) {
+      setMsg(res.error)
+      toast.error(res.error)
+    } else {
+      await syncForce()
+      toast.success(
+        discountC > 0
+          ? `Adelanto registrado, te ahorraste ${formatMoney(fromCents(discountC))}`
+          : 'Adelanto registrado',
+      )
+      router.refresh()
+      onDone()
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-2xl bg-(--muted)/60 p-3">
+      <p className="text-xs font-semibold">
+        Adelantar {label} · mensualidad {formatMoney(monthly)}
+      </p>
+      <p className="text-[11px] text-(--muted-foreground)">
+        Se aplica al mes y hoy se carga en tu tarjeta la diferencia.
+      </p>
+      <div className="space-y-1.5">
+        <Label htmlFor="prepay-applied">Se aplica al mes</Label>
+        <div className="flex items-center gap-1.5">
+          <span className="text-lg font-bold text-(--muted-foreground)">$</span>
+          <Input
+            id="prepay-applied"
+            type="number"
+            min={0.01}
+            step={0.01}
+            value={applied}
+            onChange={(e) => setApplied(e.target.value)}
+            className="h-11 text-lg font-bold"
+            inputMode="decimal"
+          />
+        </div>
+      </div>
+      <div className="flex w-full items-center justify-between gap-2 rounded-xl px-1 py-1">
+        <button
+          type="button"
+          onClick={() => setHasDiscount((v) => !v)}
+          className="text-left text-xs font-semibold">
+          Tiene descuento
+        </button>
+        <Switch checked={hasDiscount} onCheckedChange={setHasDiscount} />
+      </div>
+      {hasDiscount && (
+        <div className="space-y-1.5">
+          <Label htmlFor="prepay-discount">Descuento</Label>
+          <div className="flex items-center gap-1.5">
+            <span className="text-lg font-bold text-(--muted-foreground)">
+              $
+            </span>
+            <Input
+              id="prepay-discount"
+              type="number"
+              min={0}
+              step={0.01}
+              value={discount}
+              onChange={(e) => setDiscount(e.target.value)}
+              className="h-11 text-lg font-bold"
+              inputMode="decimal"
+              placeholder="0"
+            />
+          </div>
+        </div>
+      )}
+      {appliedC > 0 && chargedC > 0 && (
+        <p className="text-center text-xs font-semibold text-emerald-500">
+          Hoy se cargan {formatMoney(fromCents(chargedC))}
+          {discountC > 0 &&
+            ` · te ahorras ${formatMoney(fromCents(discountC))}`}
+        </p>
+      )}
+      {msg && (
+        <p className="text-center text-xs font-medium text-red-500">{msg}</p>
+      )}
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-10 flex-1 rounded-xl"
+          disabled={pending}
+          onClick={onDone}>
+          Cancelar
+        </Button>
+        <Button
+          type="button"
+          className="h-10 flex-1 rounded-xl"
+          disabled={pending || appliedC <= 0 || chargedC <= 0}
+          onClick={submit}>
+          {pending ? 'Guardando…' : 'Confirmar adelanto'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function MsiConcentrado({
   meId,
   items,
@@ -220,6 +380,11 @@ export function MsiConcentrado({
   payments: MsiPaymentsView
 }) {
   const [selId, setSelId] = useState<string | null>(null)
+  const [prepay, setPrepay] = useState<{
+    txId: string
+    month: string
+    monthly: number
+  } | null>(null)
   const curKey = useMemo(() => mexicoMonthKey(), [])
   const todayKey = useMemo(() => todayMexicoYMD(), [])
   const computed = useMemo(() => {
@@ -294,8 +459,11 @@ export function MsiConcentrado({
             <li key={it.id}>
               <button
                 type="button"
-                onClick={() => setSelId(it.id)}
-                className="w-full rounded-2xl bg-(--muted)/60 p-3.5 text-left transition active:scale-[.99] hover:bg-(--muted)">
+                onClick={() => {
+                  setSelId(it.id)
+                  setPrepay(null)
+                }}
+                className="w-full rounded-2xl bg-(--muted)/60 p-3.5 text-left transition hover:bg-(--muted) active:scale-[.99]">
                 <span className="flex items-center gap-2">
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-(--card)">
                     <CreditCard className="size-4 text-(--primary)" />
@@ -309,9 +477,7 @@ export function MsiConcentrado({
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1">
-                    <Badge variant="warning">
-                      {it.installments} MSI
-                    </Badge>
+                    <Badge variant="warning">{it.installments} MSI</Badge>
                   </span>
                 </span>
                 <span className="mt-2 flex items-center justify-between gap-2 text-xs">
@@ -334,7 +500,9 @@ export function MsiConcentrado({
                       'block h-full rounded-full',
                       c.finished ? 'bg-emerald-500' : 'bg-(--primary)',
                     )}
-                    style={{ width: `${c.finished ? 100 : Math.round(((c.curIdx + 1) / it.installments) * 100)}%` }}
+                    style={{
+                      width: `${c.finished ? 100 : Math.round(((c.curIdx + 1) / it.installments) * 100)}%`,
+                    }}
                   />
                 </span>
                 <span className="mt-1 block text-[11px] text-(--muted-foreground)">
@@ -365,7 +533,9 @@ export function MsiConcentrado({
         })}
       </ul>
 
-      <Dialog open={sel != null} onOpenChange={(o) => !o && setSelId(null)}>
+      <Dialog
+        open={sel != null}
+        onOpenChange={(o) => !o && (setSelId(null), setPrepay(null))}>
         <DialogContent>
           {sel && selComp && (
             <>
@@ -387,9 +557,7 @@ export function MsiConcentrado({
                     {sel.creatorName}
                   </p>
                   <div className="mt-2 flex flex-wrap justify-center gap-1">
-                    <Badge variant="warning">
-                      {sel.installments} MSI
-                    </Badge>
+                    <Badge variant="warning">{sel.installments} MSI</Badge>
                     {sel.isShared ? (
                       <Badge>
                         {sel.myRole === 'debtor'
@@ -460,8 +628,8 @@ export function MsiConcentrado({
                             </span>
                           </p>
                           <p className="mt-0.5 text-xs text-(--muted-foreground)">
-                            Total de su parte {formatMoney(st.total)} ·
-                            abonado {formatMoney(st.confirmed)}
+                            Total de su parte {formatMoney(st.total)} · abonado{' '}
+                            {formatMoney(st.confirmed)}
                             {st.pending > 0 && (
                               <> · por confirmar {formatMoney(st.pending)}</>
                             )}{' '}
@@ -479,17 +647,21 @@ export function MsiConcentrado({
                       Calendario de parcialidades
                     </p>
                     <p className="flex items-center gap-2 text-[10px] font-semibold text-(--muted-foreground)">
-                      <span className="inline-flex items-center gap-0.5">
-                        <Check
-                          className={cn(
-                            'size-3',
-                            sel.isShared
-                              ? 'text-emerald-500'
-                              : 'text-(--muted-foreground)',
-                          )}
-                        />{' '}
-                        {sel.isShared ? 'Pagada' : 'Cargada'}
-                      </span>
+                      {sel.isShared ? (
+                        <span className="inline-flex items-center gap-0.5">
+                          <Check className="size-3 text-emerald-500" /> Pagada
+                        </span>
+                      ) : (
+                        <>
+                          <span className="inline-flex items-center gap-0.5">
+                            <Check className="size-3 text-emerald-500" />{' '}
+                            Adelantada
+                          </span>
+                          <span className="inline-flex items-center gap-0.5">
+                            <Check className="size-3 text-emerald-500" /> Pagada
+                          </span>
+                        </>
+                      )}
                       <span className="inline-flex items-center gap-0.5">
                         <Clock className="size-3 text-amber-500" /> Pendiente
                       </span>
@@ -528,11 +700,13 @@ export function MsiConcentrado({
                         toCents(confirmed) >= toCents(expected)
                       const hasPending = toCents(pending) > 0
                       const hasPartial = !paid && toCents(confirmed) > 0
-                      // Mis compras: el periodo liquidado (o el débito ya
-                      // cargado) marca la parcialidad como pagada. Sin corte
+                      // Mis compras: periodo liquidado o débito ya cargado =
+                      // pagada; adelanto registrado = adelantada. Sin corte
                       // configurado no hay dato: queda como cargada.
+                      const adv = !sel.isShared ? sel.advances[m] : undefined
                       const minePaid =
-                        !sel.isShared && sel.settledPayKeys.includes(m)
+                        !sel.isShared &&
+                        (sel.settledPayKeys.includes(m) || adv != null)
                       const hasPayInfo =
                         !sel.isShared &&
                         (sel.accountType === 'DEBIT' ||
@@ -554,7 +728,7 @@ export function MsiConcentrado({
                         else if (isCur) state = 'due'
                         else state = 'upcoming'
                       } else if (minePaid) {
-                        state = 'paid'
+                        state = adv != null ? 'prepaid' : 'paid'
                       } else if (!hasPayInfo && isPast) {
                         state = 'charged'
                       } else if (overdue) {
@@ -567,64 +741,112 @@ export function MsiConcentrado({
                       const pill = MONTH_PILL[state]
                       // Fecha límite de la tarjeta (solo si aún no está pagada).
                       const showDue =
-                        part.dueDate != null &&
-                        (sel.isShared ? !paid : !isPast)
+                        part.dueDate != null && (sel.isShared ? !paid : !isPast)
+                      // Adelantar: solo-mías, futura y sin cubrir.
+                      const canPrepay =
+                        !sel.isShared && !minePaid && state === 'upcoming'
+                      const prepayOpen =
+                        prepay?.txId === sel.id && prepay?.month === m
                       return (
                         <li
                           key={m}
                           className={cn(
-                            'flex items-center justify-between gap-2 px-3.5 py-2.5 text-sm',
+                            'px-3.5 py-2.5 text-sm',
                             isCur && 'bg-(--primary)/10',
                           )}>
-                          <span className="min-w-0">
-                            <span className="block font-semibold">
-                              {i + 1}/{sel.installments} · {monthLabel(m)}
-                            </span>
-                            <span
-                              className={cn(
-                                'mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold',
-                                pill.cls,
-                              )}>
-                              {pill.Icon && <pill.Icon className="size-3" />}
-                              {pill.text}
-                            </span>
-                            {showDue && (
-                              <span className="block text-[10px] text-(--muted-foreground)">
-                                {overdue ? 'Venció' : 'Vence'}{' '}
-                                {wallDay(part.dueDate!)} de{' '}
-                                {fmtMonthLong(part.dueDate!)}
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="min-w-0">
+                              <span className="block font-semibold">
+                                {i + 1}/{sel.installments} · {monthLabel(m)}
                               </span>
-                            )}
-                          </span>
-                          <span className="shrink-0 text-right">
-                            <span
-                              className={cn(
-                                'block font-bold',
-                                paid && 'text-emerald-500',
-                              )}>
-                              {formatMoney(amt)}
-                            </span>
-                            {(hasPending || hasPartial) && (
-                              <span className="block text-[10px] font-semibold text-amber-500">
-                                {hasPartial && (
-                                  <>abonado {formatMoney(confirmed)}</>
-                                )}
-                                {hasPartial && hasPending && ' · '}
-                                {hasPending && (
-                                  <>por confirmar {formatMoney(pending)}</>
-                                )}
+                              <span
+                                className={cn(
+                                  'mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold',
+                                  pill.cls,
+                                )}>
+                                {pill.Icon && <pill.Icon className="size-3" />}
+                                {pill.text}
                               </span>
-                            )}
-                          </span>
+                              {showDue && (
+                                <span className="block text-[10px] text-(--muted-foreground)">
+                                  {overdue ? 'Venció' : 'Vence'}{' '}
+                                  {wallDay(part.dueDate!)} de{' '}
+                                  {fmtMonthLong(part.dueDate!)}
+                                </span>
+                              )}
+                              {canPrepay && !prepayOpen && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setPrepay({
+                                      txId: sel.id,
+                                      month: m,
+                                      monthly: amt,
+                                    })
+                                  }
+                                  className="mt-0.5 text-[11px] font-bold text-amber-500 hover:underline">
+                                  Adelantar
+                                </button>
+                              )}
+                            </span>
+                            <span className="shrink-0 text-right">
+                              <span
+                                className={cn(
+                                  'block font-bold',
+                                  paid && 'text-emerald-500',
+                                )}>
+                                {formatMoney(amt)}
+                              </span>
+                              {(hasPending || hasPartial || adv != null) && (
+                                <span className="block text-[10px] font-semibold text-amber-500">
+                                  {adv != null ? (
+                                    <>
+                                      adelanto {formatMoney(adv.paidNow)} · te
+                                      ahorraste{' '}
+                                      {formatMoney(
+                                        fromCents(
+                                          toCents(adv.applied) -
+                                            toCents(adv.paidNow),
+                                        ),
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      {hasPartial && (
+                                        <>abonado {formatMoney(confirmed)}</>
+                                      )}
+                                      {hasPartial && hasPending && ' · '}
+                                      {hasPending && (
+                                        <>
+                                          por confirmar {formatMoney(pending)}
+                                        </>
+                                      )}
+                                    </>
+                                  )}
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          {prepayOpen && prepay && (
+                            <div className="pt-3">
+                              <PrepayForm
+                                txId={prepay.txId}
+                                month={prepay.month}
+                                monthly={prepay.monthly}
+                                label={`${i + 1}/${sel.installments} · ${monthLabel(m)}`}
+                                onDone={() => setPrepay(null)}
+                              />
+                            </div>
+                          )}
                         </li>
                       )
                     })}
                   </ul>
                   {!sel.isShared && (
                     <p className="mt-1 text-center text-[11px] text-(--muted-foreground)">
-                      Pagada = el periodo quedó liquidado en tu tarjeta (en
-                      débito, el cargo ya se aplicó). Sin corte configurado
-                      solo se muestra como cargada.
+                      Adelantada = la registraste con este flujo. Pagada = el
+                      periodo quedó liquidado o el cargo ya se aplicó (débito).
+                      Sin corte configurado solo se muestra como cargada.
                     </p>
                   )}
                 </div>

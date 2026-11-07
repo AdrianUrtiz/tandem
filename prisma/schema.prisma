@@ -169,6 +169,14 @@ model Transaction {
   // Cargo mensual de suscripción (nuevo modelo checklist).
   charges SubscriptionCharge[]
 
+  // Adelanto de parcialidad MSI (solo compras propias en crédito): el
+  // EXPENSE con descuento y el INCOME que cancela la parcialidad apuntan
+  // a la compra original y al mes ("YYYY-MM") adelantado.
+  advanceForTxId String?
+  advanceForTx   Transaction?  @relation("AdvanceFor", fields: [advanceForTxId], references: [id], onDelete: SetNull)
+  advanceFor     Transaction[] @relation("AdvanceFor")
+  advanceForMonth String?
+
   debtPayment         DebtPayment?     @relation("PaymentTransaction")
   debtorSourcePayment DebtPayment?     @relation("DebtorPaymentTransaction")
   settlementCredit    GroupSettlement? @relation("SettlementTransaction")
@@ -189,6 +197,9 @@ model Transaction {
   @@index([statementKey])
   @@index([householdId])
   @@index([paidBySeatId])
+  @@index([advanceForTxId, advanceForMonth])
+  // Un adelanto = un EXPENSE + un INCOME por parcialidad (anti doble-tap).
+  @@unique([advanceForTxId, advanceForMonth, type], map: "Transaction_advanceForTxId_advanceForMonth_type_key")
 }
 
 // Catálogo de categorías: filas globales del sistema (userId null, isDefault)
