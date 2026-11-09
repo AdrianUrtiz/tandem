@@ -34,7 +34,9 @@ import { prepayInstallment } from '@/lib/prepay-installment'
 import { formatMoney, monthLabelEs } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import {
+  fmtDayMonth,
   fmtMonthLong,
+  fmtMonthShort,
   mexicoMonthKey,
   todayMexicoYMD,
   wallDay,
@@ -77,6 +79,20 @@ function monthLabel(key: string): string {
   const [y, m] = key.split('-').map(Number)
   const label = monthLabelEs(new Date(y, (m ?? 1) - 1, 1))
   return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+/** "nov 2026": mes corto para filas de lista (cabe en una línea). */
+function monthShortLabel(key: string): string {
+  const [y, m] = key.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, (m ?? 1) - 1, 1))
+  return `${fmtMonthShort(dt)} ${y}`
+}
+
+/** "5 nov 2026": fecha corta de compra (evita truncar el año). */
+function fmtShort(d: string): string {
+  const dt = new Date(d)
+  if (Number.isNaN(dt.getTime())) return ''
+  return `${fmtDayMonth(dt)} ${dt.getUTCFullYear()}`
 }
 
 function fmtFull(d: string): string {
@@ -202,7 +218,7 @@ const MONTH_PILL: Record<
   prepaid: {
     text: 'Adelantada',
     cls: 'bg-emerald-500/15 text-emerald-500',
-    Icon: Check,
+    Icon: CalendarClock,
   },
   charged: {
     text: 'Cargada',
@@ -440,10 +456,10 @@ export function MsiConcentrado({
         Pagos a meses
       </p>
       <div className="flex items-baseline justify-between gap-2">
-        <p className="text-2xl font-extrabold tracking-tight">
+        <p className="text-2xl font-extrabold tracking-tight tabular-nums">
           {formatMoney(summary.monthly)}
         </p>
-        <p className="text-right text-[11px] leading-tight text-(--muted-foreground)">
+        <p className="shrink-0 text-right text-[11px] leading-tight text-(--muted-foreground) tabular-nums">
           este mes · {summary.active}{' '}
           {summary.active === 1 ? 'compra activa' : 'compras activas'}
           <br />
@@ -472,29 +488,33 @@ export function MsiConcentrado({
                     <span className="block truncate text-sm font-semibold">
                       {it.concept}
                     </span>
-                    <span className="block truncate text-[11px] text-(--muted-foreground)">
-                      {it.accountName} · {fmtFull(it.date)}
+                    <span className="block truncate text-[11px] whitespace-nowrap text-(--muted-foreground)">
+                      {it.accountName} · {fmtShort(it.date)}
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1">
-                    <Badge variant="warning">{it.installments} MSI</Badge>
+                    <Badge variant="warning" className="tabular-nums">
+                      {it.installments} MSI
+                    </Badge>
                   </span>
                 </span>
-                <span className="mt-2 flex items-center justify-between gap-2 text-xs">
-                  <span className="inline-flex items-center gap-1 font-semibold text-(--muted-foreground)">
-                    <RoleIcon className="size-3.5" />
-                    {c.finished
-                      ? `Liquidado ${it.installments}/${it.installments}`
-                      : `Parcialidad ${c.curIdx + 1}/${it.installments}`}
+                <span className="mt-2.5 flex items-baseline justify-between gap-2 text-xs">
+                  <span className="inline-flex min-w-0 items-center gap-1 font-semibold text-(--muted-foreground)">
+                    <RoleIcon className="size-3.5 shrink-0" />
+                    <span className="truncate">
+                      {c.finished
+                        ? `Liquidado ${it.installments}/${it.installments}`
+                        : `Parcialidad ${c.curIdx + 1}/${it.installments}`}
+                    </span>
                   </span>
-                  <span className="font-extrabold">
+                  <span className="shrink-0 font-extrabold tabular-nums">
                     {formatMoney(c.monthlyNow)}
                     <span className="font-medium text-(--muted-foreground)">
                       /mes
                     </span>
                   </span>
                 </span>
-                <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-(--border)/60">
+                <span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-(--border)/60">
                   <span
                     className={cn(
                       'block h-full rounded-full',
@@ -505,15 +525,15 @@ export function MsiConcentrado({
                     }}
                   />
                 </span>
-                <span className="mt-1 block text-[11px] text-(--muted-foreground)">
+                <span className="mt-1.5 block truncate text-[11px] text-(--muted-foreground) tabular-nums">
                   {c.finished ? (
                     <span className="font-semibold text-emerald-500">
                       Sin saldo restante
                     </span>
                   ) : (
                     <>
-                      Restan {formatMoney(c.remainingTotal)} ·{' '}
-                      {monthLabel(c.months[c.curIdx]!)} es la parcialidad actual
+                      Restan {formatMoney(c.remainingTotal)} · Actual{' '}
+                      {monthShortLabel(c.months[c.curIdx]!)}
                     </>
                   )}
                   {it.isShared && (
@@ -546,10 +566,10 @@ export function MsiConcentrado({
               </DialogHeader>
               <div className="max-h-[70dvh] space-y-4 overflow-y-auto px-1 pb-2">
                 <div className="text-center">
-                  <p className="text-lg font-extrabold tracking-tight">
+                  <p className="text-lg font-extrabold tracking-tight text-balance">
                     {sel.concept}
                   </p>
-                  <p className="text-3xl font-extrabold tracking-tight">
+                  <p className="mt-0.5 text-3xl font-extrabold tracking-tight tabular-nums">
                     {formatMoney(sel.amount)}
                   </p>
                   <p className="mt-0.5 text-xs text-(--muted-foreground)">
@@ -577,28 +597,28 @@ export function MsiConcentrado({
 
                 <dl className="grid grid-cols-3 gap-2 text-center">
                   <div className="rounded-2xl bg-(--muted)/60 p-3">
-                    <dt className="flex items-center justify-center gap-1 text-[10px] font-semibold text-(--muted-foreground) uppercase">
-                      <CalendarClock className="size-3" /> Parcialidad
+                    <dt className="flex items-center justify-center gap-1 text-[10px] font-semibold tracking-wide text-(--muted-foreground) uppercase">
+                      <CalendarClock className="size-3 shrink-0" /> Parcialidad
                     </dt>
-                    <dd className="mt-0.5 text-base font-extrabold">
+                    <dd className="mt-1 text-base font-extrabold tabular-nums">
                       {selComp.finished
                         ? `${sel.installments}/${sel.installments}`
                         : `${selComp.curIdx + 1}/${sel.installments}`}
                     </dd>
                   </div>
                   <div className="rounded-2xl bg-(--muted)/60 p-3">
-                    <dt className="text-[10px] font-semibold text-(--muted-foreground) uppercase">
+                    <dt className="text-[10px] font-semibold tracking-wide text-(--muted-foreground) uppercase">
                       Monto mensual
                     </dt>
-                    <dd className="mt-0.5 text-base font-extrabold">
+                    <dd className="mt-1 text-base font-extrabold tabular-nums">
                       {formatMoney(selComp.monthlyNow)}
                     </dd>
                   </div>
                   <div className="rounded-2xl bg-(--muted)/60 p-3">
-                    <dt className="text-[10px] font-semibold text-(--muted-foreground) uppercase">
+                    <dt className="text-[10px] font-semibold tracking-wide text-(--muted-foreground) uppercase">
                       Saldo restante
                     </dt>
-                    <dd className="mt-0.5 text-base font-extrabold">
+                    <dd className="mt-1 text-base font-extrabold tabular-nums">
                       {formatMoney(selComp.remainingTotal)}
                     </dd>
                   </div>
@@ -642,31 +662,28 @@ export function MsiConcentrado({
                 )}
 
                 <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="mb-2 space-y-1.5">
                     <p className="text-xs font-semibold text-(--muted-foreground)">
                       Calendario de parcialidades
                     </p>
-                    <p className="flex items-center gap-2 text-[10px] font-semibold text-(--muted-foreground)">
+                    <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] font-semibold text-(--muted-foreground)">
                       {sel.isShared ? (
-                        <span className="inline-flex items-center gap-0.5">
+                        <span className="inline-flex items-center gap-1">
                           <Check className="size-3 text-emerald-500" /> Pagada
                         </span>
                       ) : (
                         <>
-                          <span className="inline-flex items-center gap-0.5">
-                            <Check className="size-3 text-emerald-500" />{' '}
+                          <span className="inline-flex items-center gap-1">
+                            <CalendarClock className="size-3 text-emerald-500" />{' '}
                             Adelantada
                           </span>
-                          <span className="inline-flex items-center gap-0.5">
+                          <span className="inline-flex items-center gap-1">
                             <Check className="size-3 text-emerald-500" /> Pagada
                           </span>
                         </>
                       )}
-                      <span className="inline-flex items-center gap-0.5">
+                      <span className="inline-flex items-center gap-1">
                         <Clock className="size-3 text-amber-500" /> Pendiente
-                      </span>
-                      <span className="inline-flex items-center gap-0.5">
-                        Próxima
                       </span>
                     </p>
                   </div>
@@ -751,82 +768,80 @@ export function MsiConcentrado({
                         <li
                           key={m}
                           className={cn(
-                            'px-3.5 py-2.5 text-sm',
+                            'px-4 py-3 text-sm',
                             isCur && 'bg-(--primary)/10',
                           )}>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="min-w-0">
-                              <span className="block font-semibold">
-                                {i + 1}/{sel.installments} · {monthLabel(m)}
-                              </span>
+                          <div className="flex items-baseline justify-between gap-3">
+                            <p className="min-w-0 flex-1 truncate text-[13px] font-semibold">
+                              {i + 1}/{sel.installments} · {monthLabel(m)}
+                            </p>
+                            <p
+                              className={cn(
+                                'shrink-0 text-[13px] font-bold tabular-nums',
+                                paid && 'text-emerald-500',
+                              )}>
+                              {formatMoney(amt)}
+                            </p>
+                          </div>
+                          <div className="mt-1.5 flex items-center justify-between gap-2">
+                            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                               <span
                                 className={cn(
-                                  'mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold',
+                                  'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold',
                                   pill.cls,
                                 )}>
                                 {pill.Icon && <pill.Icon className="size-3" />}
                                 {pill.text}
                               </span>
                               {showDue && (
-                                <span className="block text-[10px] text-(--muted-foreground)">
+                                <span className="text-[11px] text-(--muted-foreground)">
                                   {overdue ? 'Venció' : 'Vence'}{' '}
                                   {wallDay(part.dueDate!)} de{' '}
                                   {fmtMonthLong(part.dueDate!)}
                                 </span>
                               )}
-                              {canPrepay && !prepayOpen && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setPrepay({
-                                      txId: sel.id,
-                                      month: m,
-                                      monthly: amt,
-                                    })
-                                  }
-                                  className="mt-0.5 text-[11px] font-bold text-amber-500 hover:underline">
-                                  Adelantar
-                                </button>
-                              )}
-                            </span>
-                            <span className="shrink-0 text-right">
-                              <span
-                                className={cn(
-                                  'block font-bold',
-                                  paid && 'text-emerald-500',
-                                )}>
-                                {formatMoney(amt)}
-                              </span>
-                              {(hasPending || hasPartial || adv != null) && (
-                                <span className="block text-[10px] font-semibold text-amber-500">
-                                  {adv != null ? (
-                                    <>
-                                      adelanto {formatMoney(adv.paidNow)} · te
-                                      ahorraste{' '}
-                                      {formatMoney(
-                                        fromCents(
-                                          toCents(adv.applied) -
-                                            toCents(adv.paidNow),
-                                        ),
-                                      )}
-                                    </>
-                                  ) : (
-                                    <>
-                                      {hasPartial && (
-                                        <>abonado {formatMoney(confirmed)}</>
-                                      )}
-                                      {hasPartial && hasPending && ' · '}
-                                      {hasPending && (
-                                        <>
-                                          por confirmar {formatMoney(pending)}
-                                        </>
-                                      )}
-                                    </>
-                                  )}
-                                </span>
-                              )}
-                            </span>
+                            </div>
+                            {canPrepay && !prepayOpen && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPrepay({
+                                    txId: sel.id,
+                                    month: m,
+                                    monthly: amt,
+                                  })
+                                }
+                                className="shrink-0 rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-bold text-amber-600 transition hover:bg-amber-500/25 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 active:scale-[.97] dark:text-amber-500">
+                                Adelantar
+                              </button>
+                            )}
                           </div>
+                          {(hasPending || hasPartial || adv != null) && (
+                            <p className="mt-1 text-right text-[11px] font-medium text-amber-600 tabular-nums dark:text-amber-500">
+                              {adv != null ? (
+                                <>
+                                  Adelanto {formatMoney(adv.paidNow)} · te
+                                  ahorraste{' '}
+                                  {formatMoney(
+                                    fromCents(
+                                      toCents(adv.applied) -
+                                        toCents(adv.paidNow),
+                                    ),
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  {hasPartial && (
+                                    <>Abonado {formatMoney(confirmed)}</>
+                                  )}
+                                  {hasPartial && hasPending && ' · '}
+                                  {hasPending && (
+                                    <>Por confirmar {formatMoney(pending)}</>
+                                  )}
+                                </>
+                              )}
+                            </p>
+                          )}
                           {prepayOpen && prepay && (
                             <div className="pt-3">
                               <PrepayForm
@@ -843,7 +858,7 @@ export function MsiConcentrado({
                     })}
                   </ul>
                   {!sel.isShared && (
-                    <p className="mt-1 text-center text-[11px] text-(--muted-foreground)">
+                    <p className="mt-2 text-[11px] leading-relaxed text-(--muted-foreground)">
                       Adelantada = la registraste con este flujo. Pagada = el
                       periodo quedó liquidado o el cargo ya se aplicó (débito).
                       Sin corte configurado solo se muestra como cargada.
