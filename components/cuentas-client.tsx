@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 
-import { ArrowUpRight, Check, HandCoins, Users } from 'lucide-react'
+import { ArrowUpRight, Check, Clock, HandCoins, Users } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -51,9 +51,11 @@ import {
   buildDebts,
 } from '@/lib/partner-debts'
 import { cancelPayment, confirmPaymentSource } from '@/lib/payment-actions'
+import { PLACE_SEP, extractPlaceSuffix } from '@/lib/place-format'
 import { useStatementFilters } from '@/lib/resumen-filters'
 import type { DueCharge } from '@/lib/subscriptions'
-import { formatMoney, monthKey, monthLabelEs } from '@/lib/utils'
+import { cn, formatMoney, monthKey, monthLabelEs } from '@/lib/utils'
+import { fmtDayMonth } from '@/lib/walltime'
 
 /** Pago pendiente que mi pareja registró y yo debo confirmar (soy el acreedor). */
 export type ToConfirmItem = {
@@ -142,6 +144,12 @@ export function CuentasClient({
   const [paySheet, setPaySheet] = useState<{
     d: PartnerDebt
     mode: 'receive' | 'pay'
+  } | null>(null)
+  // Detalle por tarjeta: tap limpio en la card abre el desglose por compra.
+  const [detail, setDetail] = useState<{
+    d: PartnerDebt
+    tone: 'month' | 'overdue' | 'carried'
+    nowMonth?: string
   } | null>(null)
   const [confirmTarget, setConfirmTarget] = useState<ToConfirmItem | null>(null)
   const [sourceTarget, setSourceTarget] = useState<SourceConfirmItem | null>(
@@ -258,8 +266,7 @@ export function CuentasClient({
     { value: 'external', label: 'Otras personas' },
   ]
   const matchesWho = (debtorId: string | null, who = partnerWho) =>
-    who === 'all' ||
-    (who === 'partner' ? debtorId != null : debtorId == null)
+    who === 'all' || (who === 'partner' ? debtorId != null : debtorId == null)
   const debtsByState = useMemo(
     () =>
       partnerState === 'all'
@@ -293,9 +300,7 @@ export function CuentasClient({
     d.lines.some((l) => l.dueKey < realCurrentMonth)
   const debtsOverdueVisible = useMemo(
     () =>
-      debtsCarriedAll.filter(
-        (d) => matchesWho(d.debtorId) && isCardOverdue(d),
-      ),
+      debtsCarriedAll.filter((d) => matchesWho(d.debtorId) && isCardOverdue(d)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [debtsCarriedAll, partnerWho, partnerMonth],
   )
@@ -317,9 +322,7 @@ export function CuentasClient({
   )
   const owedPrevVisible = useMemo(
     () =>
-      owedCarriedAll.filter(
-        (d) => matchesWho(d.debtorId) && !isCardOverdue(d),
-      ),
+      owedCarriedAll.filter((d) => matchesWho(d.debtorId) && !isCardOverdue(d)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [owedCarriedAll, partnerWho, partnerMonth],
   )
@@ -712,7 +715,7 @@ export function CuentasClient({
                 Vencidos · le debes · {formatMoney(oweOverdueTotal)}
               </p>
               <p className="-mt-1 text-[11px] text-(--muted-foreground)">
-                De meses pasados ›
+                De meses pasados · toca para ver el detalle ›
               </p>
               {debtsOverdueVisible.map((d) => (
                 <DebtSwipeRow
@@ -726,6 +729,13 @@ export function CuentasClient({
                     setOpenRow(o ? `overdue:${debtKey(d)}` : null)
                   }
                   onPay={(mode) => setPaySheet({ d, mode })}
+                  onDetail={() =>
+                    setDetail({
+                      d,
+                      tone: 'overdue',
+                      nowMonth: realCurrentMonth,
+                    })
+                  }
                 />
               ))}
             </section>
@@ -736,7 +746,7 @@ export function CuentasClient({
                 Vencidos · te deben · {formatMoney(owedOverdueTotal)}
               </p>
               <p className="-mt-1 text-[11px] text-(--muted-foreground)">
-                De meses pasados ›
+                De meses pasados · toca para ver el detalle ›
               </p>
               {owedOverdueVisible.map((d) => (
                 <DebtSwipeRow
@@ -750,6 +760,13 @@ export function CuentasClient({
                     setOpenRow(o ? `overdue:${debtKey(d)}` : null)
                   }
                   onPay={(mode) => setPaySheet({ d, mode })}
+                  onDetail={() =>
+                    setDetail({
+                      d,
+                      tone: 'overdue',
+                      nowMonth: realCurrentMonth,
+                    })
+                  }
                 />
               ))}
             </section>
@@ -760,7 +777,8 @@ export function CuentasClient({
                 Pendientes anteriores · le debes · {formatMoney(owePrevTotal)}
               </p>
               <p className="-mt-1 text-[11px] text-(--muted-foreground)">
-                De meses anteriores · aún con tiempo ›
+                De meses anteriores · aún con tiempo · toca para ver el detalle
+                ›
               </p>
               {debtsPrevVisible.map((d) => (
                 <DebtSwipeRow
@@ -774,6 +792,13 @@ export function CuentasClient({
                     setOpenRow(o ? `prev:${debtKey(d)}` : null)
                   }
                   onPay={(mode) => setPaySheet({ d, mode })}
+                  onDetail={() =>
+                    setDetail({
+                      d,
+                      tone: 'carried',
+                      nowMonth: realCurrentMonth,
+                    })
+                  }
                 />
               ))}
             </section>
@@ -784,7 +809,8 @@ export function CuentasClient({
                 Pendientes anteriores · te deben · {formatMoney(owedPrevTotal)}
               </p>
               <p className="-mt-1 text-[11px] text-(--muted-foreground)">
-                De meses anteriores · aún con tiempo ›
+                De meses anteriores · aún con tiempo · toca para ver el detalle
+                ›
               </p>
               {owedPrevVisible.map((d) => (
                 <DebtSwipeRow
@@ -798,6 +824,13 @@ export function CuentasClient({
                     setOpenRow(o ? `prev:${debtKey(d)}` : null)
                   }
                   onPay={(mode) => setPaySheet({ d, mode })}
+                  onDetail={() =>
+                    setDetail({
+                      d,
+                      tone: 'carried',
+                      nowMonth: realCurrentMonth,
+                    })
+                  }
                 />
               ))}
             </section>
@@ -808,7 +841,8 @@ export function CuentasClient({
                 Le debes · {formatMoney(oweTotal)}
               </p>
               <p className="-mt-1 text-[11px] text-(--muted-foreground)">
-                Desliza a la derecha para registrar tu pago ›
+                Toca para ver el detalle · desliza a la derecha para registrar
+                tu pago ›
               </p>
               {debtsVisible.map((d) => (
                 <DebtSwipeRow
@@ -818,6 +852,7 @@ export function CuentasClient({
                   open={openRow === debtKey(d)}
                   onOpenChange={(o) => setOpenRow(o ? debtKey(d) : null)}
                   onPay={(mode) => setPaySheet({ d, mode })}
+                  onDetail={() => setDetail({ d, tone: 'month' })}
                 />
               ))}
             </section>
@@ -828,7 +863,8 @@ export function CuentasClient({
                 Te deben · {formatMoney(owedTotal)}
               </p>
               <p className="-mt-1 text-[11px] text-(--muted-foreground)">
-                Desliza a la derecha para registrar el cobro ›
+                Toca para ver el detalle · desliza a la derecha para registrar
+                el cobro ›
               </p>
               {owedVisible.map((d) => (
                 <DebtSwipeRow
@@ -838,6 +874,7 @@ export function CuentasClient({
                   open={openRow === debtKey(d)}
                   onOpenChange={(o) => setOpenRow(o ? debtKey(d) : null)}
                   onPay={(mode) => setPaySheet({ d, mode })}
+                  onDetail={() => setDetail({ d, tone: 'month' })}
                 />
               ))}
             </section>
@@ -975,6 +1012,36 @@ export function CuentasClient({
         )}
       </BottomSheet>
 
+      <Dialog open={detail != null} onOpenChange={(o) => !o && setDetail(null)}>
+        <DialogContent>
+          {detail && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-center">
+                  {detail.d.debtorId === meId
+                    ? 'Detalle de lo que debes'
+                    : 'Detalle de lo que te deben'}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="max-h-[70dvh] space-y-4 overflow-y-auto px-1 pb-2">
+                <DebtDetail
+                  d={detail.d}
+                  meId={meId}
+                  tone={detail.tone}
+                  nowMonth={detail.nowMonth}
+                  onClose={() => setDetail(null)}
+                  onPay={(mode) => {
+                    const d = detail.d
+                    setDetail(null)
+                    setPaySheet({ d, mode })
+                  }}
+                />
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={accSheet !== null}
         onOpenChange={(o) => !o && setAccSheet(null)}>
@@ -1103,6 +1170,13 @@ function debtKey(d: PartnerDebt) {
   return `${d.accountId}:${d.debtorId ?? `ext:${d.debtorName.trim().toLowerCase()}`}`
 }
 
+/** "5 nov 2026": fecha corta de compra. */
+function fmtShort(d: string): string {
+  const dt = new Date(d)
+  if (Number.isNaN(dt.getTime())) return ''
+  return `${fmtDayMonth(dt)} ${dt.getUTCFullYear()}`
+}
+
 function DebtCard({
   d,
   meId,
@@ -1179,8 +1253,7 @@ function DebtCard({
         {d.lines.map((l, i) => {
           const rest = Math.max(0, l.monthly - l.paid)
           const settled = l.shareId != null && toCents(rest) <= 0
-          const lineOverdue =
-            past && nowMonth ? l.dueKey < nowMonth : overdue
+          const lineOverdue = past && nowMonth ? l.dueKey < nowMonth : overdue
           const lineLabel = past ? monthLabelOf(l.dueKey) : null
           // Solo se marca la línea si aporta info: cards multi-mes o
           // líneas que difieren del tono de la card (p. ej. octubre vigente
@@ -1250,6 +1323,7 @@ function DebtSwipeRow({
   open,
   onOpenChange,
   onPay,
+  onDetail,
   overdue = false,
   carried = false,
   nowMonth,
@@ -1259,6 +1333,7 @@ function DebtSwipeRow({
   open: boolean
   onOpenChange: (o: boolean) => void
   onPay: (mode: 'receive' | 'pay') => void
+  onDetail: (d: PartnerDebt) => void
   overdue?: boolean
   carried?: boolean
   nowMonth?: string
@@ -1271,13 +1346,22 @@ function DebtSwipeRow({
     )
   const tone = overdue ? 'overdue' : carried ? 'carried' : 'month'
   const card = <DebtCard d={d} meId={meId} tone={tone} nowMonth={nowMonth} />
-  if (!d.lines.some((l) => l.shareId)) return card // demo: sin pagos
+  if (!d.lines.some((l) => l.shareId))
+    return (
+      <button
+        type="button"
+        onClick={() => onDetail(d)}
+        className="w-full cursor-pointer text-left transition active:scale-[.99]">
+        {card}
+      </button>
+    ) // demo: sin pagos
   return (
     <SwipeRow
       open={open}
       onOpenChange={onOpenChange}
       leftActionsWidth={132}
       disabled={settled}
+      onTap={() => onDetail(d)}
       leftActions={
         <button
           type="button"
@@ -1300,6 +1384,233 @@ function DebtSwipeRow({
       }>
       {card}
     </SwipeRow>
+  )
+}
+
+function DebtDetail({
+  d,
+  meId,
+  tone = 'month',
+  nowMonth,
+  onClose,
+  onPay,
+}: {
+  d: PartnerDebt
+  meId: string
+  tone?: 'month' | 'overdue' | 'carried'
+  nowMonth?: string
+  onClose: () => void
+  onPay: (mode: 'receive' | 'pay') => void
+}) {
+  const owe = d.debtorId === meId
+  const overdue = tone === 'overdue'
+  const past = overdue || tone === 'carried'
+  const due =
+    d.dueLabel ??
+    (d.accountType === 'CREDIT' && d.dueDay
+      ? `para el día ${d.dueDay}`
+      : 'antes de fin de mes')
+  const dueKeys = [...new Set(d.lines.map((l) => l.dueKey))].sort()
+  const monthLabelOf = (key: string) => {
+    const [y, mo] = key.split('-').map(Number)
+    if (!y || !mo) return null
+    return monthLabelEs(new Date(y, mo - 1, 1))
+  }
+  const firstLabel = dueKeys.length > 0 ? monthLabelOf(dueKeys[0]) : null
+  const multi = dueKeys.length > 1
+  const settledAll = toCents(d.remaining) <= 0
+  return (
+    <>
+      <div className="text-center">
+        <p className="text-lg font-extrabold tracking-tight text-balance">
+          {owe ? (
+            <>
+              Le debes a{' '}
+              <span className="text-(--foreground)">{d.creditorName}</span>
+            </>
+          ) : (
+            <>
+              <span className="text-(--foreground)">{d.debtorName}</span> te
+              debe
+            </>
+          )}
+        </p>
+        <p className="mt-0.5 text-3xl font-extrabold tracking-tight tabular-nums">
+          {formatMoney(d.remaining)}
+        </p>
+        <p className="mt-0.5 text-xs text-(--muted-foreground)">
+          {d.accountName} ·{' '}
+          {past && firstLabel
+            ? overdue
+              ? multi
+                ? `vencidos desde ${firstLabel}`
+                : `vencido de ${firstLabel}`
+              : multi
+                ? `desde ${firstLabel}`
+                : `de ${firstLabel}`
+            : due}
+        </p>
+        {overdue && (
+          <p className="mt-2 inline-flex rounded-full bg-red-500/15 px-2.5 py-0.5 text-[10px] font-bold text-red-500 uppercase">
+            Vencido
+          </p>
+        )}
+      </div>
+
+      <dl className="grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-2xl bg-(--muted)/60 p-3">
+          <dt className="text-[10px] font-semibold tracking-wide text-(--muted-foreground) uppercase">
+            Compras
+          </dt>
+          <dd className="mt-1 text-base font-extrabold tabular-nums">
+            {d.lines.length}
+          </dd>
+        </div>
+        <div className="rounded-2xl bg-(--muted)/60 p-3">
+          <dt className="text-[10px] font-semibold tracking-wide text-(--muted-foreground) uppercase">
+            Mensual
+          </dt>
+          <dd className="mt-1 text-base font-extrabold tabular-nums">
+            {formatMoney(d.total)}
+          </dd>
+        </div>
+        <div className="rounded-2xl bg-(--muted)/60 p-3">
+          <dt className="text-[10px] font-semibold tracking-wide text-(--muted-foreground) uppercase">
+            Restante
+          </dt>
+          <dd className="mt-1 text-base font-extrabold tabular-nums">
+            {formatMoney(d.remaining)}
+          </dd>
+        </div>
+      </dl>
+
+      <div>
+        <p className="mb-2 text-xs font-semibold text-(--muted-foreground)">
+          Compras incluidas
+        </p>
+        <ul className="divide-y divide-(--border)/60 rounded-2xl border border-(--border)/60">
+          {d.lines.map((l, i) => {
+            const rest = Math.max(0, l.monthly - l.paid)
+            const settled = l.shareId != null && toCents(rest) <= 0
+            const lineOverdue = past && nowMonth ? l.dueKey < nowMonth : overdue
+            const lineLabel = past ? monthLabelOf(l.dueKey) : null
+            const showLineLabel =
+              past && lineLabel && (multi || lineOverdue !== overdue)
+            // Lugar: vive dentro del concepto ("Despensa - Sam's").
+            const place = extractPlaceSuffix(l.concept)
+            const desc = place
+              ? l.concept.slice(0, l.concept.lastIndexOf(PLACE_SEP)).trim() ||
+                l.concept
+              : l.concept
+            const pill = settled
+              ? {
+                  text: 'Liquidado',
+                  cls: 'bg-emerald-500/15 text-emerald-500',
+                  Icon: Check,
+                }
+              : l.pending > 0
+                ? {
+                    text: 'Por confirmar',
+                    cls: 'bg-amber-500/15 text-amber-500',
+                    Icon: Clock,
+                  }
+                : l.paid > 0
+                  ? {
+                      text: 'Abono parcial',
+                      cls: 'bg-amber-500/15 text-amber-500',
+                      Icon: Clock,
+                    }
+                  : null
+            return (
+              <li key={i} className="px-4 py-3 text-sm">
+                <p className="truncate text-[13px] font-semibold">
+                  {desc}{' '}
+                  <span className="font-semibold text-(--muted-foreground)">
+                    (
+                    {l.installments > 1
+                      ? `${l.installment}/${l.installments}`
+                      : 'único'}
+                    )
+                  </span>
+                </p>
+                {(l.date || place) && (
+                  <p className="mt-0.5 truncate text-[11px] text-(--muted-foreground)">
+                    {l.date && <>Comprada el {fmtShort(l.date)}</>}
+                    {l.date && place && ' · '}
+                    {place}
+                  </p>
+                )}
+                <div className="mt-1.5 flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    {pill && (
+                      <span
+                        className={cn(
+                          'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold',
+                          pill.cls,
+                        )}>
+                        {pill.Icon && <pill.Icon className="size-3" />}
+                        {pill.text}
+                      </span>
+                    )}
+                    {showLineLabel &&
+                      (lineOverdue ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-500">
+                          <span className="size-1.5 rounded-full bg-red-500" />
+                          Vencido · {lineLabel}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-(--muted-foreground)">
+                          De {lineLabel} · aún con tiempo
+                        </span>
+                      ))}
+                  </div>
+                  <p className="shrink-0 text-[13px] font-bold tabular-nums">
+                    {formatMoney(l.monthly)}
+                    <span className="font-medium text-(--muted-foreground)">
+                      /mes
+                    </span>
+                  </p>
+                </div>
+                {(l.paid > 0 || l.pending > 0) && (
+                  <p className="mt-1 text-right text-[11px] font-medium text-(--muted-foreground) tabular-nums">
+                    {l.paid > 0 && <>Abonado {formatMoney(l.paid)}</>}
+                    {l.paid > 0 && l.pending > 0 && ' · '}
+                    {l.pending > 0 && (
+                      <>Por confirmar {formatMoney(l.pending)}</>
+                    )}
+                    {l.paid > 0 && rest > 0 && (
+                      <> · Restan {formatMoney(rest)}</>
+                    )}
+                  </p>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+
+      {settledAll ? (
+        <p className="text-center text-sm font-semibold text-emerald-500">
+          Sin saldo restante
+        </p>
+      ) : (
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-10 flex-1 rounded-xl"
+            onClick={onClose}>
+            Cerrar
+          </Button>
+          <Button
+            type="button"
+            className="h-10 flex-1 rounded-xl"
+            onClick={() => onPay(owe ? 'pay' : 'receive')}>
+            {owe ? 'Registrar pago' : 'Registrar cobro'}
+          </Button>
+        </div>
+      )}
+    </>
   )
 }
 

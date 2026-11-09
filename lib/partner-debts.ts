@@ -9,6 +9,7 @@ export type DebtLine = {
   installments: number // total de parcialidades
   shareId: string | null // null en modo demo (sin pagos)
   month: string // "YYYY-MM" de la parcialidad: clave de registro del abono
+  date: string // ISO de la compra (para mostrar cuándo se hizo)
   paid: number // suma CONFIRMED
   pending: number // suma PENDING
   /** Mes exigible (vencimiento en crédito con corte, compra en el resto). */
@@ -106,6 +107,7 @@ export function buildDebts(
         installments: it.installments,
         shareId: it.shareId || null,
         month: p.payKey,
+        date: it.date,
         paid: s.confirmed,
         pending: s.pending,
         dueKey: p.dueKey,
@@ -170,6 +172,7 @@ export function buildCarriedDebts(
         installments: it.installments,
         shareId: it.shareId || null,
         month: p.payKey,
+        date: it.date,
         paid: s.confirmed,
         pending: s.pending,
         dueKey: p.dueKey,
